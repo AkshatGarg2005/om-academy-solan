@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { uploadToCloudinary } from '../../utils/cloudinary';
+import { EmailAuthProvider, reauthenticateWithCredential, updatePassword } from 'firebase/auth';
+import { auth } from '../../config/firebase';
 import { getInitials } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 import {
-  HiOutlinePencil, HiOutlineCheck, HiOutlineX, HiOutlineCamera,
+  HiOutlinePencil, HiOutlineCheck, HiOutlineX, HiOutlineLockClosed,
 } from 'react-icons/hi';
 
 export default function Profile() {
@@ -12,8 +13,13 @@ export default function Profile() {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({});
-  const [photoFile, setPhotoFile] = useState(null);
-  const [photoPreview, setPhotoPreview] = useState(null);
+
+  // Password change state
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
 
   if (!userProfile) {
     return (
@@ -27,6 +33,7 @@ export default function Profile() {
     setForm({
       name: userProfile.name || '',
       studentPhone: userProfile.studentPhone || '',
+      phone: userProfile.phone || '',
       aadhaar: userProfile.aadhaar || '',
       dob: userProfile.dob || '',
       address: userProfile.address || '',
@@ -35,35 +42,18 @@ export default function Profile() {
       fathersName: userProfile.fathersName || '',
       guardianName: userProfile.guardianName || '',
       guardianPhone: userProfile.guardianPhone || '',
+      subject: userProfile.subject || '',
     });
-    setPhotoFile(null);
-    setPhotoPreview(null);
     setEditing(true);
   }
 
   function cancelEdit() {
     setEditing(false);
     setForm({});
-    setPhotoFile(null);
-    setPhotoPreview(null);
   }
 
   function updateField(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
-  }
-
-  function handlePhotoChange(e) {
-    const file = e.target.files[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error('Photo must be under 5MB');
-        return;
-      }
-      setPhotoFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => setPhotoPreview(reader.result);
-      reader.readAsDataURL(file);
-    }
   }
 
   async function handleSave() {
@@ -73,11 +63,7 @@ export default function Profile() {
     }
     setSaving(true);
     try {
-      const updates = { ...form };
-      if (photoFile) {
-        updates.photoURL = await uploadToCloudinary(photoFile);
-      }
-      await updateProfile(updates);
+      await updateProfile({ ...form });
       toast.success('Profile updated!');
       setEditing(false);
     } catch (err) {
@@ -88,9 +74,45 @@ export default function Profile() {
     }
   }
 
-  const displayPhoto = photoPreview || userProfile.photoURL;
+  async function handleChangePassword(e) {
+    e.preventDefault();
+    if (!currentPassword) { toast.error('Enter current password'); return; }
+    if (!newPassword || newPassword.length < 6) { toast.error('New password must be at least 6 characters'); return; }
+    if (newPassword !== confirmPassword) { toast.error('Passwords do not match'); return; }
 
-  const fields = [
+    setChangingPassword(true);
+    try {
+      // Re-authenticate
+      const credential = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
+      await reauthenticateWithCredential(auth.currentUser, credential);
+
+      // Update password
+      await updatePassword(auth.currentUser, newPassword);
+
+      toast.success('Password changed successfully!');
+      setShowPasswordForm(false);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err) {
+      console.error(err);
+      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        toast.error('Current password is incorrect');
+      } else if (err.code === 'auth/weak-password') {
+        toast.error('New password is too weak');
+      } else {
+        toast.error(err.message || 'Failed to change password');
+      }
+    } finally {
+      setChangingPassword(false);
+    }
+  }
+
+  const isStudent = userProfile.role === 'student';
+  const isTeacher = userProfile.role === 'teacher';
+
+  // Fields based on role
+  const studentFields = [
     { key: 'name', label: 'Full Name', type: 'text' },
     { key: 'studentPhone', label: 'Student Phone', type: 'tel' },
     { key: 'dob', label: 'Date of Birth', type: 'date' },
@@ -103,10 +125,21 @@ export default function Profile() {
     { key: 'guardianPhone', label: 'Guardian Phone', type: 'tel' },
   ];
 
+  const staffFields = [
+    { key: 'name', label: 'Full Name', type: 'text' },
+    { key: 'phone', label: 'Phone', type: 'tel' },
+    { key: 'subject', label: 'Subject / Specialization', type: 'text' },
+  ];
+
+  const fields = isStudent ? studentFields : staffFields;
+
   const readOnlyFields = [
     { label: 'Email', value: userProfile.email },
-    { label: 'Date of Admission', value: userProfile.dateOfAdmission || '—' },
+    { label: 'Role', value: userProfile.role?.charAt(0).toUpperCase() + userProfile.role?.slice(1) },
+    ...(isStudent ? [{ label: 'Date of Admission', value: userProfile.dateOfAdmission || '—' }] : []),
   ];
+
+  const roleBadgeClass = userProfile.role === 'admin' ? 'badge-warning' : isTeacher ? 'badge-info' : 'badge-success';
 
   return (
     <div className="page">
@@ -117,34 +150,14 @@ export default function Profile() {
             width: 88, height: 88, fontSize: '2rem', margin: '0 auto 12px',
             border: '3px solid rgba(255,255,255,0.3)',
           }}>
-            {displayPhoto ? (
-              <img src={displayPhoto} alt={userProfile.name} />
-            ) : (
-              getInitials(userProfile.name)
-            )}
+            {getInitials(userProfile.name)}
           </div>
-          {editing && (
-            <label htmlFor="profile-photo-input" style={{
-              position: 'absolute', bottom: 8, right: -4,
-              width: 32, height: 32, borderRadius: '50%',
-              background: 'var(--white)', color: 'var(--green-700)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: 'pointer', boxShadow: 'var(--shadow-md)',
-              fontSize: '0.875rem',
-            }}>
-              <HiOutlineCamera />
-              <input
-                type="file"
-                id="profile-photo-input"
-                accept="image/*"
-                onChange={handlePhotoChange}
-                style={{ display: 'none' }}
-              />
-            </label>
-          )}
         </div>
         <h1>{userProfile.name}</h1>
         <p>{userProfile.email}</p>
+        <span className={`badge ${roleBadgeClass}`} style={{ marginTop: 8 }}>
+          {userProfile.role?.charAt(0).toUpperCase() + userProfile.role?.slice(1)}
+        </span>
       </div>
 
       {/* Edit / Save / Cancel buttons */}
@@ -219,6 +232,83 @@ export default function Profile() {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Change Password Section */}
+      <div style={{ marginTop: 24 }}>
+        <div className="section-title">
+          <h2>Security</h2>
+        </div>
+
+        {!showPasswordForm ? (
+          <button
+            className="btn btn-secondary"
+            onClick={() => setShowPasswordForm(true)}
+            id="change-password-btn"
+            style={{ width: '100%' }}
+          >
+            <HiOutlineLockClosed /> Change Password
+          </button>
+        ) : (
+          <div className="card">
+            <h3 style={{ fontSize: '1rem', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <HiOutlineLockClosed /> Change Password
+            </h3>
+            <form onSubmit={handleChangePassword}>
+              <div className="form-group">
+                <label className="form-label">Current Password</label>
+                <input
+                  type="password"
+                  className="form-input"
+                  placeholder="Enter current password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  autoComplete="current-password"
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">New Password</label>
+                <input
+                  type="password"
+                  className="form-input"
+                  placeholder="Min 6 characters"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  autoComplete="new-password"
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Confirm New Password</label>
+                <input
+                  type="password"
+                  className="form-input"
+                  placeholder="Re-enter new password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  autoComplete="new-password"
+                />
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setShowPasswordForm(false);
+                    setCurrentPassword('');
+                    setNewPassword('');
+                    setConfirmPassword('');
+                  }}
+                  disabled={changingPassword}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={changingPassword} id="change-password-submit">
+                  {changingPassword ? 'Changing...' : 'Change Password'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
       </div>
     </div>
   );

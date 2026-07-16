@@ -25,6 +25,7 @@ export function AuthProvider({ children }) {
       ...profileData,
       email,
       role: 'student',
+      teacherIds: [],
       createdAt: serverTimestamp(),
     };
     await setDoc(doc(db, 'users', cred.user.uid), userDoc);
@@ -76,14 +77,18 @@ export function AuthProvider({ children }) {
     return unsubscribe;
   }, []);
 
+  const isAdmin = userProfile?.role === 'admin';
   const isTeacher = userProfile?.role === 'teacher';
   const isStudent = userProfile?.role === 'student';
+  const isStaff = isAdmin || isTeacher;
 
   const value = {
     currentUser,
     userProfile,
+    isAdmin,
     isTeacher,
     isStudent,
+    isStaff,
     loading,
     register,
     login,

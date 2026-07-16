@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
+import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import {
   HiOutlinePlus, HiOutlineCheckCircle, HiOutlineXCircle,
@@ -10,6 +11,7 @@ import {
 import { getInitials, formatDate } from '../../utils/helpers';
 
 export default function FeeForm() {
+  const { currentUser, isAdmin } = useAuth();
   const [students, setStudents] = useState([]);
   const [selectedStudent, setSelectedStudent] = useState('');
   const [month, setMonth] = useState('');
@@ -37,8 +39,18 @@ export default function FeeForm() {
 
   async function loadInitialData() {
     try {
+      let studentsQuery;
+      if (isAdmin) {
+        studentsQuery = query(collection(db, 'users'), where('role', '==', 'student'));
+      } else {
+        studentsQuery = query(
+          collection(db, 'users'),
+          where('role', '==', 'student'),
+          where('teacherIds', 'array-contains', currentUser.uid)
+        );
+      }
       const [studentsSnap, feesSnap] = await Promise.all([
-        getDocs(query(collection(db, 'users'), where('role', '==', 'student'))),
+        getDocs(studentsQuery),
         getDocs(query(collection(db, 'fees'), where('paid', '==', false))),
       ]);
       const studentList = studentsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -231,11 +243,7 @@ export default function FeeForm() {
                   onClick={() => setSelectedStudent(student.id)}
                 >
                   <div className="avatar" style={{ width: 36, height: 36, fontSize: '0.75rem', flexShrink: 0 }}>
-                    {student.photoURL ? (
-                      <img src={student.photoURL} alt={student.name} />
-                    ) : (
-                      getInitials(student.name)
-                    )}
+                    {getInitials(student.name)}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <h4 style={{

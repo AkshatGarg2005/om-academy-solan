@@ -6,10 +6,12 @@ import toast from 'react-hot-toast';
 import { HiOutlineClipboardCheck } from 'react-icons/hi';
 
 export default function AttendanceForm() {
-  const { currentUser } = useAuth();
+  const { currentUser, isAdmin } = useAuth();
   const [batches, setBatches] = useState([]);
   const [selectedBatch, setSelectedBatch] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const today = new Date();
+  const localDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const [date, setDate] = useState(localDate);
   const [students, setStudents] = useState([]);
   const [attendance, setAttendance] = useState({});
   const [existingRecords, setExistingRecords] = useState({}); // studentId -> docId
@@ -44,13 +46,27 @@ export default function AttendanceForm() {
   async function loadBatchStudents(batchId) {
     setLoading(true);
     try {
-      const q = query(
-        collection(db, 'users'),
-        where('role', '==', 'student'),
-        where('batchIds', 'array-contains', batchId)
-      );
+      let q;
+      if (isAdmin) {
+        q = query(
+          collection(db, 'users'),
+          where('role', '==', 'student'),
+          where('batchIds', 'array-contains', batchId)
+        );
+      } else {
+        // Teacher: students in this batch who are also assigned to this teacher
+        q = query(
+          collection(db, 'users'),
+          where('role', '==', 'student'),
+          where('batchIds', 'array-contains', batchId)
+        );
+      }
       const snap = await getDocs(q);
-      const studentList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      let studentList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      // For teachers, filter to only their assigned students
+      if (!isAdmin) {
+        studentList = studentList.filter((s) => (s.teacherIds || []).includes(currentUser.uid));
+      }
       setStudents(studentList);
       // Default all to present
       const defaultAttendance = {};

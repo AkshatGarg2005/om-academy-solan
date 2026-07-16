@@ -26,6 +26,10 @@ import FeeForm from './components/Fee/FeeForm';
 import BatchManage from './components/Batch/BatchManage';
 import AllStudents from './components/Teacher/AllStudents';
 
+// Admin Pages
+import ManageTeachers from './components/Admin/ManageTeachers';
+import AssignStudents from './components/Admin/AssignStudents';
+
 function AppLayout() {
   const { currentUser, userProfile, loading } = useAuth();
 
@@ -76,24 +80,32 @@ function AppLayout() {
             <ProtectedRoute><FeeView /></ProtectedRoute>
           } />
 
-          {/* Teacher pages */}
+          {/* Staff pages (teacher + admin) */}
           <Route path="/students" element={
-            <ProtectedRoute teacherOnly><AllStudents /></ProtectedRoute>
+            <ProtectedRoute staffOnly><AllStudents /></ProtectedRoute>
           } />
           <Route path="/tests/add" element={
-            <ProtectedRoute teacherOnly><TestReportForm /></ProtectedRoute>
+            <ProtectedRoute staffOnly><TestReportForm /></ProtectedRoute>
           } />
           <Route path="/attendance/mark" element={
-            <ProtectedRoute teacherOnly><AttendanceForm /></ProtectedRoute>
+            <ProtectedRoute staffOnly><AttendanceForm /></ProtectedRoute>
           } />
           <Route path="/courses/manage" element={
-            <ProtectedRoute teacherOnly><CourseForm /></ProtectedRoute>
+            <ProtectedRoute staffOnly><CourseForm /></ProtectedRoute>
           } />
           <Route path="/fees/manage" element={
-            <ProtectedRoute teacherOnly><FeeForm /></ProtectedRoute>
+            <ProtectedRoute staffOnly><FeeForm /></ProtectedRoute>
           } />
           <Route path="/batches" element={
-            <ProtectedRoute teacherOnly><BatchManage /></ProtectedRoute>
+            <ProtectedRoute staffOnly><BatchManage /></ProtectedRoute>
+          } />
+
+          {/* Admin-only pages */}
+          <Route path="/admin/teachers" element={
+            <ProtectedRoute adminOnly><ManageTeachers /></ProtectedRoute>
+          } />
+          <Route path="/admin/assign" element={
+            <ProtectedRoute adminOnly><AssignStudents /></ProtectedRoute>
           } />
 
           {/* Redirects */}

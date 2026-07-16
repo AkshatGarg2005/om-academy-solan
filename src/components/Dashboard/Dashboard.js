@@ -8,14 +8,15 @@ import toast from 'react-hot-toast';
 import {
   HiOutlineDocumentText, HiOutlineCalendar, HiOutlineAcademicCap,
   HiOutlineCurrencyRupee, HiOutlineUsers, HiOutlineClipboardCheck,
-  HiOutlineLogout,
+  HiOutlineLogout, HiOutlineUserGroup,
 } from 'react-icons/hi';
 import './Dashboard.css';
 
 export default function Dashboard() {
-  const { currentUser, userProfile, isTeacher, logout } = useAuth();
+  const { currentUser, userProfile, isAdmin, isTeacher, isStaff, logout } = useAuth();
   const navigate = useNavigate();
   const [stats, setStats] = useState({
+    totalTeachers: 0,
     totalStudents: 0,
     attendancePercent: 0,
     totalTests: 0,
@@ -32,24 +33,50 @@ export default function Dashboard() {
   useEffect(() => {
     if (!currentUser) return;
     loadStats();
-  }, [currentUser, isTeacher]);
+  }, [currentUser, isStaff]);
 
   async function loadStats() {
     try {
-      if (isTeacher) {
-        // Teacher stats
+      if (isStaff) {
+        // Admin or Teacher stats
+        let studentsQuery;
+        if (isAdmin) {
+          studentsQuery = query(collection(db, 'users'), where('role', '==', 'student'));
+        } else {
+          // Teacher: only their assigned students
+          studentsQuery = query(
+            collection(db, 'users'),
+            where('role', '==', 'student'),
+            where('teacherIds', 'array-contains', currentUser.uid)
+          );
+        }
+
         const [usersSnap, feesSnap, testsSnap, attendanceSnap] = await Promise.all([
-          getDocs(query(collection(db, 'users'), where('role', '==', 'student'))),
+          getDocs(studentsQuery),
           getDocs(query(collection(db, 'fees'), where('paid', '==', false))),
           getDocs(collection(db, 'testReports')),
           getDocs(collection(db, 'attendance')),
         ]);
 
+        // For admin, also count teachers
+        let totalTeachers = 0;
+        if (isAdmin) {
+          const teacherSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'teacher')));
+          totalTeachers = teacherSnap.size;
+        }
+
+        // For teachers, filter fees/tests/attendance to their students only
+        const studentIds = usersSnap.docs.map((d) => d.id);
+        const scopedFees = isAdmin ? feesSnap.size : feesSnap.docs.filter((d) => studentIds.includes(d.data().studentId)).length;
+        const scopedTests = isAdmin ? testsSnap.size : testsSnap.docs.filter((d) => studentIds.includes(d.data().studentId)).length;
+        const scopedAttendance = isAdmin ? attendanceSnap.size : attendanceSnap.docs.filter((d) => studentIds.includes(d.data().studentId)).length;
+
         setStats({
+          totalTeachers,
           totalStudents: usersSnap.size,
-          pendingFees: feesSnap.size,
-          totalTests: testsSnap.size,
-          totalAttendanceRecords: attendanceSnap.size,
+          pendingFees: scopedFees,
+          totalTests: scopedTests,
+          totalAttendanceRecords: scopedAttendance,
           totalCourses: 0,
           attendancePercent: 0,
           recentTests: [],
@@ -164,18 +191,14 @@ export default function Dashboard() {
         <div className="dashboard-header-top">
           <div className="dashboard-user">
             <div className="avatar avatar-lg">
-              {userProfile?.photoURL ? (
-                <img src={userProfile.photoURL} alt={userProfile.name} />
-              ) : (
-                getInitials(userProfile?.name)
-              )}
+              {getInitials(userProfile?.name)}
             </div>
             <div>
               <p style={{ opacity: 0.8, fontSize: '0.8125rem' }}>
-                {isTeacher ? 'Welcome, Teacher' : 'Welcome back'}
+                {isStaff ? `Welcome, ${isAdmin ? 'Admin' : 'Teacher'}` : 'Welcome back'}
               </p>
               <h1>{userProfile?.name || 'User'}</h1>
-              {!isTeacher && ((stats.batchInfo || []).length > 0 || stats.courseNames.length > 0) && (
+              {!isStaff && ((stats.batchInfo || []).length > 0 || stats.courseNames.length > 0) && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
                   {(stats.batchInfo || []).map((b, i) => (
                     <span key={'b' + i} style={{
@@ -206,7 +229,7 @@ export default function Dashboard() {
       </div>
 
       {/* Fee Due Warning */}
-      {!isTeacher && stats.upcomingFees.length > 0 && (
+      {!isStaff && stats.upcomingFees.length > 0 && (
         <div className="card" style={{
           marginBottom: 16, borderLeft: '4px solid var(--danger)',
           background: 'linear-gradient(135deg, #fef2f2, #fff)',
@@ -249,8 +272,17 @@ export default function Dashboard() {
 
       {/* Stats */}
       <div className="stats-grid stagger-list">
-        {isTeacher ? (
+        {isStaff ? (
           <>
+            {isAdmin && (
+              <div className="stat-card" onClick={() => navigate('/admin/teachers')}>
+                <div className="stat-icon" style={{ background: '#fef3c7', color: '#b45309' }}>
+                  <HiOutlineUserGroup />
+                </div>
+                <div className="stat-value">{stats.totalTeachers}</div>
+                <div className="stat-label">Teachers</div>
+              </div>
+            )}
             <div className="stat-card" onClick={() => navigate('/students')}>
               <div className="stat-icon" style={{ background: 'var(--green-100)', color: 'var(--green-700)' }}>
                 <HiOutlineUsers />
@@ -318,13 +350,24 @@ export default function Dashboard() {
       </div>
 
       {/* Quick Actions for teacher */}
-      {isTeacher && (
+      {isStaff && (
         <div className="section-title">
           <h2>Quick Actions</h2>
         </div>
       )}
-      {isTeacher && (
+      {isStaff && (
         <div className="quick-actions stagger-list">
+          {isAdmin && (
+            <div className="list-card" onClick={() => navigate('/admin/assign')}>
+              <div className="stat-icon" style={{ background: '#fef3c7', color: '#b45309', width: 44, height: 44, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <HiOutlineUserGroup />
+              </div>
+              <div className="list-card-content">
+                <h4>Assign Students</h4>
+                <p>Assign teachers to students</p>
+              </div>
+            </div>
+          )}
           <div className="list-card" onClick={() => navigate('/attendance/mark')}>
             <div className="stat-icon" style={{ background: 'var(--green-100)', color: 'var(--green-700)', width: 44, height: 44, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <HiOutlineClipboardCheck />
@@ -356,7 +399,7 @@ export default function Dashboard() {
       )}
 
       {/* Recent Test Reports (Student) */}
-      {!isTeacher && stats.recentTests.length > 0 && (
+      {!isStaff && stats.recentTests.length > 0 && (
         <>
           <div className="section-title">
             <h2>Recent Tests</h2>

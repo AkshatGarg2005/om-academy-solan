@@ -3,25 +3,28 @@ import { initializeApp, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import { collection, query, where, getDocs, doc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { db, firebaseConfig } from '../../config/firebase';
+import { useAuth } from '../../contexts/AuthContext';
 import { getInitials } from '../../utils/helpers';
-import { uploadToCloudinary } from '../../utils/cloudinary';
+
 import toast from 'react-hot-toast';
 import {
   HiOutlineSearch, HiOutlineTrash, HiOutlinePlus,
-  HiOutlineX, HiOutlineCamera,
+  HiOutlineX,
 } from 'react-icons/hi';
 
 export default function AllStudents() {
+  const { currentUser, isAdmin } = useAuth();
   const [students, setStudents] = useState([]);
   const [batches, setBatches] = useState([]);
+  const [teachers, setTeachers] = useState([]);
   const [search, setSearch] = useState('');
   const [filterBatch, setFilterBatch] = useState('');
+  const [filterTeacher, setFilterTeacher] = useState('');
   const [loading, setLoading] = useState(true);
   const [expandedStudent, setExpandedStudent] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [photoFile, setPhotoFile] = useState(null);
-  const [photoPreview, setPhotoPreview] = useState(null);
+
   const [form, setForm] = useState({
     name: '', studentPhone: '', email: '', password: '',
     aadhaar: '', dob: '', address: '', previousEducation: '',
@@ -35,12 +38,29 @@ export default function AllStudents() {
 
   async function loadData() {
     try {
+      let studentsQuery;
+      if (isAdmin) {
+        studentsQuery = query(collection(db, 'users'), where('role', '==', 'student'));
+      } else {
+        // Teacher: only students assigned to them
+        studentsQuery = query(
+          collection(db, 'users'),
+          where('role', '==', 'student'),
+          where('teacherIds', 'array-contains', currentUser.uid)
+        );
+      }
       const [sSnap, bSnap] = await Promise.all([
-        getDocs(query(collection(db, 'users'), where('role', '==', 'student'))),
+        getDocs(studentsQuery),
         getDocs(collection(db, 'batches')),
       ]);
       setStudents(sSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
       setBatches(bSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+
+      // Admin: also load teachers for filter dropdown
+      if (isAdmin) {
+        const tSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'teacher')));
+        setTeachers(tSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -51,7 +71,12 @@ export default function AllStudents() {
   const filtered = students.filter((s) => {
     const matchSearch = !search || s.name?.toLowerCase().includes(search.toLowerCase()) || s.email?.toLowerCase().includes(search.toLowerCase());
     const matchBatch = !filterBatch || (s.batchIds || []).includes(filterBatch);
-    return matchSearch && matchBatch;
+    const matchTeacher = !filterTeacher
+      ? true
+      : filterTeacher === 'unassigned'
+        ? !(s.teacherIds?.length > 0)
+        : (s.teacherIds || []).includes(filterTeacher);
+    return matchSearch && matchBatch && matchTeacher;
   });
 
   function getBatchNames(batchIds) {
@@ -91,16 +116,7 @@ export default function AllStudents() {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
-  function handlePhotoChange(e) {
-    const file = e.target.files[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) { toast.error('Photo must be under 5MB'); return; }
-      setPhotoFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => setPhotoPreview(reader.result);
-      reader.readAsDataURL(file);
-    }
-  }
+
 
   function resetAddForm() {
     setForm({
@@ -109,8 +125,7 @@ export default function AllStudents() {
       mothersName: '', fathersName: '', guardianName: '', guardianPhone: '',
       dateOfAdmission: new Date().toISOString().split('T')[0],
     });
-    setPhotoFile(null);
-    setPhotoPreview(null);
+
     setShowAddForm(false);
   }
 
@@ -122,11 +137,7 @@ export default function AllStudents() {
 
     setAdding(true);
     try {
-      // Upload photo if provided
-      let photoURL = '';
-      if (photoFile) {
-        photoURL = await uploadToCloudinary(photoFile);
-      }
+
 
       // Use a secondary Firebase app to create the user without signing out the teacher
       const secondaryApp = initializeApp(firebaseConfig, 'secondary-' + Date.now());
@@ -140,7 +151,7 @@ export default function AllStudents() {
         name: form.name.trim(),
         studentPhone: form.studentPhone.trim(),
         email: form.email.trim(),
-        photoURL,
+
         aadhaar: form.aadhaar.trim(),
         dob: form.dob,
         address: form.address.trim(),
@@ -151,6 +162,7 @@ export default function AllStudents() {
         guardianPhone: form.guardianPhone.trim(),
         dateOfAdmission: form.dateOfAdmission,
         role: 'student',
+        teacherIds: isAdmin ? [] : [currentUser.uid],
         batchIds: [],
         courseIds: [],
         createdAt: serverTimestamp(),
@@ -201,25 +213,7 @@ export default function AllStudents() {
         <div className="card" style={{ marginBottom: 20 }}>
           <h3 style={{ fontSize: '1rem', marginBottom: 16 }}>Add New Student</h3>
           <form onSubmit={handleAddStudent}>
-            {/* Photo */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-              <label htmlFor="add-photo" style={{
-                width: 56, height: 56, borderRadius: '50%', flexShrink: 0,
-                background: 'var(--green-50)', border: '2px dashed var(--green-300)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer', overflow: 'hidden', color: 'var(--green-600)',
-              }}>
-                {photoPreview ? (
-                  <img src={photoPreview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                ) : (
-                  <HiOutlineCamera style={{ fontSize: '1.25rem' }} />
-                )}
-              </label>
-              <input type="file" id="add-photo" accept="image/*" onChange={handlePhotoChange} style={{ display: 'none' }} />
-              <p style={{ fontSize: '0.8125rem', color: 'var(--gray-500)' }}>
-                {photoFile ? photoFile.name : 'Tap to upload photo (optional)'}
-              </p>
-            </div>
+
 
             {/* Core fields */}
             <div className="form-row">
@@ -320,6 +314,21 @@ export default function AllStudents() {
             <option key={b.id} value={b.id}>{b.name}</option>
           ))}
         </select>
+        {isAdmin && (
+          <select
+            className="form-input"
+            style={{ width: 'auto', minWidth: 140, padding: '10px 14px' }}
+            value={filterTeacher}
+            onChange={(e) => setFilterTeacher(e.target.value)}
+            id="students-filter-teacher"
+          >
+            <option value="">All Teachers</option>
+            <option value="unassigned">⚠️ Unassigned</option>
+            {teachers.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* Student List */}
@@ -343,11 +352,7 @@ export default function AllStudents() {
                 onClick={() => setExpandedStudent(expandedStudent === student.id ? null : student.id)}
               >
                 <div className="avatar">
-                  {student.photoURL ? (
-                    <img src={student.photoURL} alt={student.name} />
-                  ) : (
-                    getInitials(student.name)
-                  )}
+                  {getInitials(student.name)}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <h4 style={{ fontSize: '0.9375rem', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

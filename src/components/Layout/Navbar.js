@@ -9,11 +9,12 @@ import {
   HiOutlineCurrencyRupee,
   HiOutlineUsers,
   HiOutlineUserCircle,
+  HiOutlineUserGroup,
 } from 'react-icons/hi';
 import './Navbar.css';
 
 export default function Navbar() {
-  const { isTeacher } = useAuth();
+  const { isAdmin, isTeacher } = useAuth();
   const location = useLocation();
 
   const studentLinks = [
@@ -32,7 +33,15 @@ export default function Navbar() {
     { to: '/courses/manage', icon: HiOutlineAcademicCap, label: 'Courses' },
   ];
 
-  const links = isTeacher ? teacherLinks : studentLinks;
+  const adminLinks = [
+    { to: '/dashboard', icon: HiOutlineHome, label: 'Home' },
+    { to: '/admin/teachers', icon: HiOutlineUserGroup, label: 'Teachers' },
+    { to: '/students', icon: HiOutlineUsers, label: 'Students' },
+    { to: '/attendance/mark', icon: HiOutlineCalendar, label: 'Attendance' },
+    { to: '/fees/manage', icon: HiOutlineCurrencyRupee, label: 'Fees' },
+  ];
+
+  const links = isAdmin ? adminLinks : isTeacher ? teacherLinks : studentLinks;
 
   return (
     <nav className="bottom-nav" id="bottom-nav">

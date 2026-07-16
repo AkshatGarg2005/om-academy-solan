@@ -44,10 +44,10 @@ export default function Login() {
         {/* Header */}
         <div className="auth-header">
           <div className="auth-logo">
-            <span>NT</span>
+            <span>OA</span>
           </div>
           <h1>Welcome Back</h1>
-          <p>Sign in to Nitin Tutorial</p>
+          <p>Sign in to Om Academy</p>
         </div>
 
         {/* Form */}

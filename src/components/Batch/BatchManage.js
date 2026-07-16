@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { collection, getDocs, addDoc, deleteDoc, updateDoc, doc, query, where, serverTimestamp, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { db } from '../../config/firebase';
+import { useAuth } from '../../contexts/AuthContext';
 import { getInitials } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 import { HiOutlinePlus, HiOutlineTrash, HiOutlineUserAdd, HiOutlineX, HiOutlineCheck, HiOutlinePencil, HiOutlineSearch } from 'react-icons/hi';
 
 export default function BatchManage() {
+  const { currentUser, isAdmin } = useAuth();
   const [batches, setBatches] = useState([]);
   const [students, setStudents] = useState([]);
   const [name, setName] = useState('');
@@ -26,9 +28,19 @@ export default function BatchManage() {
 
   async function loadData() {
     try {
+      let studentsQuery;
+      if (isAdmin) {
+        studentsQuery = query(collection(db, 'users'), where('role', '==', 'student'));
+      } else {
+        studentsQuery = query(
+          collection(db, 'users'),
+          where('role', '==', 'student'),
+          where('teacherIds', 'array-contains', currentUser.uid)
+        );
+      }
       const [bSnap, sSnap] = await Promise.all([
         getDocs(collection(db, 'batches')),
-        getDocs(query(collection(db, 'users'), where('role', '==', 'student'))),
+        getDocs(studentsQuery),
       ]);
       setBatches(bSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
       setStudents(sSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
@@ -337,7 +349,7 @@ export default function BatchManage() {
                             >
                               <input type="checkbox" checked={!!selectedToRemove[s.id]} onChange={() => toggleRemove(s.id)} onClick={(e) => e.stopPropagation()} />
                               <div className="avatar" style={{ width: 28, height: 28, fontSize: '0.625rem', flexShrink: 0 }}>
-                                {s.photoURL ? <img src={s.photoURL} alt={s.name} /> : getInitials(s.name)}
+                                {getInitials(s.name)}
                               </div>
                               <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>{s.name}</span>
                             </div>
@@ -391,7 +403,7 @@ export default function BatchManage() {
                             >
                               <input type="checkbox" checked={!!selectedToAdd[s.id]} onChange={() => toggleAdd(s.id)} onClick={(e) => e.stopPropagation()} />
                               <div className="avatar" style={{ width: 28, height: 28, fontSize: '0.625rem', flexShrink: 0 }}>
-                                {s.photoURL ? <img src={s.photoURL} alt={s.name} /> : getInitials(s.name)}
+                                {getInitials(s.name)}
                               </div>
                               <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>{s.name}</span>
                             </div>

@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { collection, getDocs, addDoc, deleteDoc, updateDoc, doc, query, where, serverTimestamp, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { db } from '../../config/firebase';
+import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import { HiOutlinePlus, HiOutlineTrash, HiOutlineUserAdd, HiOutlinePencil, HiOutlineCheck, HiOutlineX, HiOutlineSearch } from 'react-icons/hi';
 
 export default function CourseForm() {
+  const { currentUser, isAdmin } = useAuth();
   const [courses, setCourses] = useState([]);
   const [students, setStudents] = useState([]);
   const [name, setName] = useState('');
@@ -24,9 +26,19 @@ export default function CourseForm() {
 
   async function loadData() {
     try {
+      let studentsQuery;
+      if (isAdmin) {
+        studentsQuery = query(collection(db, 'users'), where('role', '==', 'student'));
+      } else {
+        studentsQuery = query(
+          collection(db, 'users'),
+          where('role', '==', 'student'),
+          where('teacherIds', 'array-contains', currentUser.uid)
+        );
+      }
       const [courseSnap, studentSnap] = await Promise.all([
         getDocs(collection(db, 'courses')),
-        getDocs(query(collection(db, 'users'), where('role', '==', 'student'))),
+        getDocs(studentsQuery),
       ]);
       setCourses(courseSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
       setStudents(studentSnap.docs.map((d) => ({ id: d.id, ...d.data() })));

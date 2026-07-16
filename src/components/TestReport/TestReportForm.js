@@ -9,7 +9,7 @@ import { HiOutlinePlus, HiOutlineTrash, HiOutlineX } from 'react-icons/hi';
 const EMPTY_SUBJECT = { subjectName: '', obtainedMarks: '', totalMarks: '', remarks: '' };
 
 export default function TestReportForm() {
-  const { currentUser } = useAuth();
+  const { currentUser, isAdmin } = useAuth();
   const [students, setStudents] = useState([]);
   const [selectedStudent, setSelectedStudent] = useState('');
   const [testDate, setTestDate] = useState(new Date().toISOString().split('T')[0]);
@@ -28,7 +28,16 @@ export default function TestReportForm() {
   }, [selectedStudent]);
 
   async function loadStudents() {
-    const q = query(collection(db, 'users'), where('role', '==', 'student'));
+    let q;
+    if (isAdmin) {
+      q = query(collection(db, 'users'), where('role', '==', 'student'));
+    } else {
+      q = query(
+        collection(db, 'users'),
+        where('role', '==', 'student'),
+        where('teacherIds', 'array-contains', currentUser.uid)
+      );
+    }
     const snap = await getDocs(q);
     setStudents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
   }

@@ -9,16 +9,17 @@ import {
   HiOutlineCurrencyRupee,
   HiOutlineUsers,
   HiOutlineLogout,
-
   HiOutlineUserCircle,
   HiOutlineCollection,
+  HiOutlineUserGroup,
+  HiOutlineLink,
 } from 'react-icons/hi';
 import { getInitials } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 import './Sidebar.css';
 
 export default function Sidebar() {
-  const { userProfile, isTeacher, logout } = useAuth();
+  const { userProfile, isAdmin, isTeacher, logout } = useAuth();
   const navigate = useNavigate();
 
   const studentLinks = [
@@ -32,15 +33,32 @@ export default function Sidebar() {
 
   const teacherLinks = [
     { to: '/dashboard', icon: HiOutlineHome, label: 'Dashboard' },
+    { to: '/students', icon: HiOutlineUsers, label: 'My Students' },
+    { to: '/attendance/mark', icon: HiOutlineCalendar, label: 'Attendance' },
+    { to: '/tests/add', icon: HiOutlineDocumentText, label: 'Test Reports' },
+    { to: '/courses/manage', icon: HiOutlineAcademicCap, label: 'Courses' },
+    { to: '/fees/manage', icon: HiOutlineCurrencyRupee, label: 'Manage Fees' },
+    { to: '/batches', icon: HiOutlineCollection, label: 'Batches' },
+    { to: '/profile', icon: HiOutlineUserCircle, label: 'My Profile' },
+  ];
+
+  const adminLinks = [
+    { to: '/dashboard', icon: HiOutlineHome, label: 'Dashboard' },
+    { to: '/admin/teachers', icon: HiOutlineUserGroup, label: 'Teachers' },
+    { to: '/admin/assign', icon: HiOutlineLink, label: 'Assign Students' },
     { to: '/students', icon: HiOutlineUsers, label: 'All Students' },
     { to: '/attendance/mark', icon: HiOutlineCalendar, label: 'Attendance' },
     { to: '/tests/add', icon: HiOutlineDocumentText, label: 'Test Reports' },
     { to: '/courses/manage', icon: HiOutlineAcademicCap, label: 'Courses' },
     { to: '/fees/manage', icon: HiOutlineCurrencyRupee, label: 'Manage Fees' },
     { to: '/batches', icon: HiOutlineCollection, label: 'Batches' },
+    { to: '/profile', icon: HiOutlineUserCircle, label: 'My Profile' },
   ];
 
-  const links = isTeacher ? teacherLinks : studentLinks;
+  const links = isAdmin ? adminLinks : isTeacher ? teacherLinks : studentLinks;
+
+  const roleBadge = isAdmin ? 'Admin' : isTeacher ? 'Teacher' : 'Student';
+  const roleBadgeClass = isAdmin ? 'badge-warning' : isTeacher ? 'badge-info' : 'badge-success';
 
   async function handleLogout() {
     try {
@@ -57,10 +75,10 @@ export default function Sidebar() {
       {/* Brand */}
       <div className="sidebar-brand">
         <div className="sidebar-logo">
-          <span>NT</span>
+          <span>OA</span>
         </div>
         <div className="sidebar-brand-text">
-          <h3>Nitin Tutorial</h3>
+          <h3>Om Academy</h3>
           <p>Solan, H.P.</p>
         </div>
       </div>
@@ -68,16 +86,12 @@ export default function Sidebar() {
       {/* User Info */}
       <div className="sidebar-user">
         <div className="avatar">
-          {userProfile?.photoURL ? (
-            <img src={userProfile.photoURL} alt={userProfile.name} />
-          ) : (
-            getInitials(userProfile?.name)
-          )}
+          {getInitials(userProfile?.name)}
         </div>
         <div className="sidebar-user-info">
           <span className="sidebar-user-name">{userProfile?.name}</span>
-          <span className={`badge ${isTeacher ? 'badge-info' : 'badge-success'}`}>
-            {isTeacher ? 'Teacher' : 'Student'}
+          <span className={`badge ${roleBadgeClass}`}>
+            {roleBadge}
           </span>
         </div>
       </div>
