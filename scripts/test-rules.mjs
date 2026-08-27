@@ -111,6 +111,19 @@ await check('self-update', 'student assigns self a teacher', 'deny', () =>
 
 await check('delete', 'teacher deletes a student', 'deny', () =>
   deleteDoc(doc(teacher, 'users/student1')));
+await check('delete', 'teacher deletes a batch', 'deny', () =>
+  deleteDoc(doc(teacher, 'batches/b1')));
+await check('delete', 'teacher deletes a course', 'deny', () =>
+  deleteDoc(doc(teacher, 'courses/c1')));
+await check('delete', 'teacher still creates a batch', 'allow', () =>
+  setDoc(doc(teacher, 'batches/b2'), { name: 'Evening', timing: '5-7' }));
+await check('delete', 'teacher still updates a batch', 'allow', () =>
+  updateDoc(doc(teacher, 'batches/b1'), { timing: '9-11' }));
+await check('delete', 'admin deletes a batch', 'allow', () =>
+  deleteDoc(doc(admin, 'batches/b2')));
+await check('delete', 'admin deletes a course', 'allow', () =>
+  setDoc(doc(admin, 'courses/c2'), { name: 'tmp' }).then(() =>
+    deleteDoc(doc(admin, 'courses/c2'))));
 await check('delete', 'admin deletes a student', 'allow', () =>
   deleteDoc(doc(admin, 'users/newstudent')));
 

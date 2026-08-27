@@ -3,7 +3,7 @@ import { collection, query, where, getDocs, addDoc, deleteDoc, doc, serverTimest
 import { db } from '../../config/firebase';
 import { loadStudents } from '../../utils/firestore';
 import { useAuth } from '../../contexts/AuthContext';
-import { formatDate } from '../../utils/helpers';
+import { formatDate, todayLocalISO } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 import { HiOutlinePlus, HiOutlineTrash, HiOutlineX } from 'react-icons/hi';
 
@@ -13,7 +13,7 @@ export default function TestReportForm() {
   const { currentUser, isAdmin } = useAuth();
   const [students, setStudents] = useState([]);
   const [selectedStudent, setSelectedStudent] = useState('');
-  const [testDate, setTestDate] = useState(new Date().toISOString().split('T')[0]);
+  const [testDate, setTestDate] = useState(todayLocalISO);
   const [subjects, setSubjects] = useState([{ ...EMPTY_SUBJECT }]);
   const [loading, setLoading] = useState(false);
   const [reports, setReports] = useState([]);

@@ -288,9 +288,12 @@ export default function BatchManage() {
                         <button className={`btn-icon btn-sm`} style={{ color: isManaging ? 'var(--gray-500)' : 'var(--green-600)' }} onClick={() => openManage(batch.id)} title="Manage students">
                           {isManaging ? <HiOutlineX /> : <HiOutlineUserAdd />}
                         </button>
-                        <button className="btn-icon btn-sm" style={{ color: 'var(--danger)' }} onClick={() => handleDelete(batch.id)} title="Delete batch">
-                          <HiOutlineTrash />
-                        </button>
+                        {/* Admin only: see the note on CourseForm's delete. */}
+                        {isAdmin && (
+                          <button className="btn-icon btn-sm" style={{ color: 'var(--danger)' }} onClick={() => handleDelete(batch.id)} title="Delete batch">
+                            <HiOutlineTrash />
+                          </button>
+                        )}
                       </div>
                     </>
                   )}

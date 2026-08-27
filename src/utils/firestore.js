@@ -111,13 +111,17 @@ export async function cached(key, loader, ttlMs = DEFAULT_TTL_MS) {
   if (hit && Date.now() - hit.storedAt < ttlMs) return hit.value;
 
   const pending = loader();
-  cache.set(key, { storedAt: Date.now(), value: pending });
+  const entry = { storedAt: Date.now(), value: pending };
+  cache.set(key, entry);
   try {
     const value = await pending;
-    cache.set(key, { storedAt: Date.now(), value });
+    // Only publish if this entry is still the one held under `key`. An
+    // invalidate() that lands while the load is in flight replaces or removes
+    // the entry, and resolving must not resurrect the pre-mutation data.
+    if (cache.get(key) === entry) cache.set(key, { storedAt: Date.now(), value });
     return value;
   } catch (err) {
-    cache.delete(key);
+    if (cache.get(key) === entry) cache.delete(key);
     throw err;
   }
 }

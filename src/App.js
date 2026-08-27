@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Navbar from './components/Layout/Navbar';
 import Sidebar from './components/Layout/Sidebar';
 import ProtectedRoute from './components/Layout/ProtectedRoute';
+import ErrorBoundary from './components/common/ErrorBoundary';
 
 // Auth — Login is the first thing a signed-out visitor sees
 import Login from './components/Auth/Login';
@@ -51,13 +52,15 @@ function AppLayout() {
   // Not logged in — show auth pages only
   if (!currentUser || !userProfile) {
     return (
-      <Suspense fallback={<PageSpinner />}>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
-      </Suspense>
+      <ErrorBoundary>
+        <Suspense fallback={<PageSpinner />}>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="*" element={<Navigate to="/login" replace />} />
+          </Routes>
+        </Suspense>
+      </ErrorBoundary>
     );
   }
 
@@ -66,6 +69,7 @@ function AppLayout() {
     <div className="app-layout">
       <Sidebar />
       <main className="main-content">
+        <ErrorBoundary>
         <Suspense fallback={<PageSpinner />}>
         <Routes>
           {/* Dashboard */}
@@ -125,6 +129,7 @@ function AppLayout() {
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
         </Suspense>
+        </ErrorBoundary>
       </main>
       <Navbar />
     </div>

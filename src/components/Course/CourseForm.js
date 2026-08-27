@@ -247,9 +247,14 @@ export default function CourseForm() {
                         <button className="btn-icon btn-sm" style={{ color: 'var(--green-600)' }} onClick={() => setShowEnroll(showEnroll === course.id ? null : course.id)} title="Enroll student">
                           <HiOutlineUserAdd />
                         </button>
-                        <button className="btn-icon btn-sm" style={{ color: 'var(--danger)' }} onClick={() => handleDelete(course.id)} title="Delete">
-                          <HiOutlineTrash />
-                        </button>
+                        {/* Admin only: a teacher can only see their own students,
+                            so their cleanup would leave every other teacher's
+                            students pointing at a deleted course. */}
+                        {isAdmin && (
+                          <button className="btn-icon btn-sm" style={{ color: 'var(--danger)' }} onClick={() => handleDelete(course.id)} title="Delete">
+                            <HiOutlineTrash />
+                          </button>
+                        )}
                       </div>
                     </>
                   )}

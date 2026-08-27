@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import FeeForm from './FeeForm';
 import { useAuth } from '../../contexts/AuthContext';
@@ -116,6 +116,72 @@ describe('FeeForm — pending list search', () => {
     await userEvent.clear(pendingSearch());
     expect(pendingList().getByText('Priya Verma')).toBeInTheDocument();
     expect(screen.getByText('Total Pending')).toBeInTheDocument();
+  });
+});
+
+describe('FeeForm — switching student', () => {
+  const pick = async (name) => {
+    await userEvent.click(picker());
+    await userEvent.click(dropdown().getByRole('option', { name }));
+  };
+
+  test('never shows the previous student\'s fee records', async () => {
+    // mockReset, not clearAllMocks: the latter leaves queued once-values from
+    // the outer beforeEach in place, and this test needs the queue to itself.
+    getDocs.mockReset();
+    useAuth.mockReturnValue({ currentUser: { uid: 'admin1' }, isAdmin: true });
+    loadStudents.mockResolvedValue(STUDENTS);
+    getDocs
+      .mockResolvedValueOnce(asSnap([]))                       // loadInitialData
+      .mockResolvedValueOnce(asSnap([                          // Aarav's fees
+        { id: 'f1', studentId: 's1', month: 'AARAV-JAN', amount: 111, paid: false, dueDate: '' },
+      ]))
+      .mockImplementationOnce(() => new Promise(() => {}));     // Priya's fees: still in flight
+
+    render(<FeeForm />);
+    await ready();
+
+    await pick('Aarav Sharma');
+    await waitFor(() => expect(screen.getByText('AARAV-JAN')).toBeInTheDocument());
+
+    await pick('Priya Verma');
+    // The heading switches immediately, so the rows must not lag behind it —
+    // Paid/Edit/Delete carried the previous student's fee ids.
+    expect(screen.getByRole('heading', { name: /Fee Records for Priya Verma/ })).toBeInTheDocument();
+    expect(screen.queryByText('AARAV-JAN')).not.toBeInTheDocument();
+  });
+
+  test('a slow response for a deselected student is discarded', async () => {
+    // mockReset, not clearAllMocks: the latter leaves queued once-values from
+    // the outer beforeEach in place, and this test needs the queue to itself.
+    getDocs.mockReset();
+    useAuth.mockReturnValue({ currentUser: { uid: 'admin1' }, isAdmin: true });
+    loadStudents.mockResolvedValue(STUDENTS);
+
+    let releaseAarav;
+    getDocs
+      .mockResolvedValueOnce(asSnap([]))                                   // loadInitialData
+      .mockImplementationOnce(() => new Promise((r) => { releaseAarav = r; }))
+      .mockResolvedValueOnce(asSnap([                                      // Priya's fees
+        { id: 'f2', studentId: 's2', month: 'PRIYA-FEB', amount: 222, paid: false, dueDate: '' },
+      ]));
+
+    render(<FeeForm />);
+    await ready();
+
+    await pick('Aarav Sharma');
+    await pick('Priya Verma');
+    await waitFor(() => expect(screen.getByText('PRIYA-FEB')).toBeInTheDocument());
+
+    // Aarav's request now lands, after he stopped being the selection.
+    await act(async () => {
+      releaseAarav(asSnap([
+        { id: 'f1', studentId: 's1', month: 'AARAV-JAN', amount: 111, paid: false, dueDate: '' },
+      ]));
+    });
+
+    expect(screen.queryByText('AARAV-JAN')).not.toBeInTheDocument();
+    expect(screen.getByText('PRIYA-FEB')).toBeInTheDocument();
   });
 });
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { loadStudents, loadTeachers, invalidateStudents } from '../../utils/firestore';
 import { getInitials } from '../../utils/helpers';
@@ -55,7 +55,12 @@ export default function AssignStudents() {
 
     setSaving(studentId);
     try {
-      await updateDoc(doc(db, 'users', studentId), { teacherIds: newIds });
+      // arrayUnion/arrayRemove rather than writing the whole array: the roster
+      // can be up to five minutes stale from the cache, and a whole-array write
+      // would silently drop assignments made in the meantime.
+      await updateDoc(doc(db, 'users', studentId), {
+        teacherIds: isAssigned ? arrayRemove(teacherId) : arrayUnion(teacherId),
+      });
       setStudents((prev) =>
         prev.map((s) => s.id === studentId ? { ...s, teacherIds: newIds } : s)
       );

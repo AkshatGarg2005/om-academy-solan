@@ -37,12 +37,14 @@ export default function TestReportList() {
       // visit; the total comes from a count aggregation.
       const [count, snap] = await Promise.all([
         countDocs(query(collection(db, 'testReports'), where('studentId', '==', currentUser.uid))),
-        getDocs(reportsQuery(limit(PAGE_SIZE))),
+        getDocs(reportsQuery(limit(PAGE_SIZE + 1))),
       ]);
       setTotal(count);
-      setReports(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setLastDoc(snap.docs[snap.docs.length - 1] || null);
-      setHasMore(snap.size === PAGE_SIZE);
+      const page = snap.docs.slice(0, PAGE_SIZE);
+      setReports(page.map((d) => ({ id: d.id, ...d.data() })));
+      setLastDoc(page[page.length - 1] || null);
+      // The extra row is a lookahead only; it is never rendered.
+      setHasMore(snap.docs.length > PAGE_SIZE);
     } catch (err) {
       console.error('Error loading test reports:', err);
     } finally {
@@ -54,10 +56,11 @@ export default function TestReportList() {
     if (!lastDoc) return;
     setLoadingMore(true);
     try {
-      const snap = await getDocs(reportsQuery(startAfter(lastDoc), limit(PAGE_SIZE)));
-      setReports((prev) => [...prev, ...snap.docs.map((d) => ({ id: d.id, ...d.data() }))]);
-      setLastDoc(snap.docs[snap.docs.length - 1] || lastDoc);
-      setHasMore(snap.size === PAGE_SIZE);
+      const snap = await getDocs(reportsQuery(startAfter(lastDoc), limit(PAGE_SIZE + 1)));
+      const page = snap.docs.slice(0, PAGE_SIZE);
+      setReports((prev) => [...prev, ...page.map((d) => ({ id: d.id, ...d.data() }))]);
+      setLastDoc(page[page.length - 1] || lastDoc);
+      setHasMore(snap.docs.length > PAGE_SIZE);
     } catch (err) {
       console.error('Error loading more test reports:', err);
     } finally {

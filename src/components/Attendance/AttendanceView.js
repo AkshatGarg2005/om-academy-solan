@@ -43,7 +43,7 @@ export default function AttendanceView() {
         // student's entire attendance history on every visit.
         countDocs(mine),
         countDocs(query(mine, where('present', '==', true))),
-        getDocs(recordsQuery(limit(PAGE_SIZE))),
+        getDocs(recordsQuery(limit(PAGE_SIZE + 1))),
       ]);
 
       const batchMap = {};
@@ -52,9 +52,11 @@ export default function AttendanceView() {
 
       setTotalCount(total);
       setPresentCount(present);
-      setRecords(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setLastDoc(snap.docs[snap.docs.length - 1] || null);
-      setHasMore(snap.size === PAGE_SIZE);
+      const page = snap.docs.slice(0, PAGE_SIZE);
+      setRecords(page.map((d) => ({ id: d.id, ...d.data() })));
+      setLastDoc(page[page.length - 1] || null);
+      // The extra row is a lookahead only; it is never rendered.
+      setHasMore(snap.docs.length > PAGE_SIZE);
     } catch (err) {
       console.error('Error loading attendance:', err);
     } finally {
@@ -66,10 +68,11 @@ export default function AttendanceView() {
     if (!lastDoc) return;
     setLoadingMore(true);
     try {
-      const snap = await getDocs(recordsQuery(startAfter(lastDoc), limit(PAGE_SIZE)));
-      setRecords((prev) => [...prev, ...snap.docs.map((d) => ({ id: d.id, ...d.data() }))]);
-      setLastDoc(snap.docs[snap.docs.length - 1] || lastDoc);
-      setHasMore(snap.size === PAGE_SIZE);
+      const snap = await getDocs(recordsQuery(startAfter(lastDoc), limit(PAGE_SIZE + 1)));
+      const page = snap.docs.slice(0, PAGE_SIZE);
+      setRecords((prev) => [...prev, ...page.map((d) => ({ id: d.id, ...d.data() }))]);
+      setLastDoc(page[page.length - 1] || lastDoc);
+      setHasMore(snap.docs.length > PAGE_SIZE);
     } catch (err) {
       console.error('Error loading more attendance:', err);
     } finally {

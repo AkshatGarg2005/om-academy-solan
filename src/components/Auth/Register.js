@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
+import { todayLocalISO } from '../../utils/helpers';
 import {
   HiOutlineMail, HiOutlineLockClosed, HiOutlineEye, HiOutlineEyeOff,
   HiOutlineUser, HiOutlineArrowLeft, HiOutlineArrowRight,
@@ -23,12 +24,16 @@ const INITIAL_FORM = {
   fathersName: '',
   guardianName: '',
   guardianPhone: '',
-  dateOfAdmission: new Date().toISOString().split('T')[0],
 };
 
 export default function Register() {
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState(INITIAL_FORM);
+  // dateOfAdmission is seeded here rather than in INITIAL_FORM: a module-level
+  // constant is evaluated once at import and would go stale past midnight.
+  const [form, setForm] = useState(() => ({
+    ...INITIAL_FORM,
+    dateOfAdmission: todayLocalISO(),
+  }));
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const { register } = useAuth();

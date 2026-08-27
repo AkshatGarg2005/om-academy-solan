@@ -1,24 +1,29 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { collection, query, where, getDocs, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { loadBatches, commitInChunks } from '../../utils/firestore';
 import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import { HiOutlineClipboardCheck } from 'react-icons/hi';
+import { todayLocalISO } from '../../utils/helpers';
 
 export default function AttendanceForm() {
   const { currentUser, isAdmin } = useAuth();
   const [batches, setBatches] = useState([]);
   const [selectedBatch, setSelectedBatch] = useState('');
-  const today = new Date();
-  const localDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  const [date, setDate] = useState(localDate);
+  const [date, setDate] = useState(todayLocalISO);
   const [students, setStudents] = useState([]);
   const [attendance, setAttendance] = useState({});
   const [existingRecords, setExistingRecords] = useState({}); // studentId -> docId
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [isUpdate, setIsUpdate] = useState(false);
+  // Bumped per request. Switching batch or date fires overlapping reads, and
+  // without these an earlier response landing last would leave the roster and
+  // the selected batch out of step — attendance would then be written for one
+  // batch's students under another batch's id.
+  const rosterRequest = useRef(0);
+  const existingRequest = useRef(0);
 
   useEffect(() => {
     loadBatchList();
@@ -51,6 +56,9 @@ export default function AttendanceForm() {
   }
 
   async function loadBatchStudents(batchId) {
+    const token = (rosterRequest.current += 1);
+    // Any existing-attendance read still in flight belongs to the old batch.
+    existingRequest.current += 1;
     setLoading(true);
     try {
       const snap = await getDocs(query(
@@ -58,6 +66,7 @@ export default function AttendanceForm() {
         where('role', '==', 'student'),
         where('batchIds', 'array-contains', batchId)
       ));
+      if (token !== rosterRequest.current) return; // superseded by a later batch
       let studentList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       // For teachers, filter to only their assigned students
       if (!isAdmin) {
@@ -73,11 +82,12 @@ export default function AttendanceForm() {
     } catch (err) {
       console.error(err);
     } finally {
-      setLoading(false);
+      if (token === rosterRequest.current) setLoading(false);
     }
   }
 
   async function loadExistingAttendance() {
+    const token = (existingRequest.current += 1);
     try {
       const q = query(
         collection(db, 'attendance'),
@@ -85,6 +95,7 @@ export default function AttendanceForm() {
         where('date', '==', date)
       );
       const snap = await getDocs(q);
+      if (token !== existingRequest.current) return; // superseded by a later batch/date
       if (snap.empty) {
         // No existing records — fresh entry
         setIsUpdate(false);

@@ -88,8 +88,10 @@ export default function AllStudents() {
         getDocs(query(collection(db, 'testReports'), where('studentId', '==', studentId))),
         getDocs(query(collection(db, 'fees'), where('studentId', '==', studentId))),
       ]);
-      // Committed as batches so a mid-flight failure cannot leave the student
-      // deleted but their records behind (or the reverse).
+      // Committed as batches rather than individual requests. The user document
+      // is deleted last, so a failure part way through leaves the student intact
+      // and the delete retryable. Note that beyond 500 operations this spans
+      // several commits and is no longer atomic as a whole.
       const deletes = [];
       attSnap.docs.forEach((d) => deletes.push((b) => b.delete(doc(db, 'attendance', d.id))));
       testSnap.docs.forEach((d) => deletes.push((b) => b.delete(doc(db, 'testReports', d.id))));

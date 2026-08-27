@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { loadStudents, queryByIds } from '../../utils/firestore';
@@ -12,6 +12,14 @@ import {
 import { getInitials, formatDate } from '../../utils/helpers';
 import SearchableSelect from '../common/SearchableSelect';
 
+// Fee documents carry a Firestore Timestamp; one just added locally has none
+// yet, and is by definition the newest.
+function createdAtMs(fee) {
+  const ts = fee.createdAt;
+  if (!ts) return Infinity;
+  return typeof ts.toMillis === 'function' ? ts.toMillis() : new Date(ts).getTime();
+}
+
 export default function FeeForm() {
   const { currentUser, isAdmin } = useAuth();
   const [students, setStudents] = useState([]);
@@ -21,6 +29,7 @@ export default function FeeForm() {
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(true);
   const [fees, setFees] = useState([]);
+  const [loadingFees, setLoadingFees] = useState(false);
   const [adding, setAdding] = useState(false);
   const [pendingFees, setPendingFees] = useState([]);
   const [showPending, setShowPending] = useState(true);
@@ -61,6 +70,14 @@ export default function FeeForm() {
     );
   }, [pendingByStudent, search]);
 
+  // Newest first, matching the student-facing FeeView. Sorted here rather than
+  // with orderBy() so that fee documents predating the createdAt field — which
+  // an orderBy would silently drop from the query — still appear.
+  const sortedFees = useMemo(
+    () => [...fees].sort((a, b) => createdAtMs(b) - createdAtMs(a)),
+    [fees]
+  );
+
   const pendingTotal = pendingByStudent.reduce((sum, s) => sum + s.totalAmount, 0);
   const filteredTotal = filteredPending.reduce((sum, s) => sum + s.totalAmount, 0);
 
@@ -68,8 +85,17 @@ export default function FeeForm() {
     loadInitialData();
   }, []);
 
+  // Bumped per request so a slow response for a previously selected student
+  // cannot overwrite the current one's records.
+  const feesRequest = useRef(0);
+
   useEffect(() => {
+    // Clear first: leaving the previous student's rows on screen under the new
+    // student's heading meant Paid/Edit/Delete acted on the wrong records.
+    setFees([]);
+    feesRequest.current += 1;
     if (selectedStudent) loadStudentFees(selectedStudent);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedStudent]);
 
   async function loadInitialData() {
@@ -98,12 +124,17 @@ export default function FeeForm() {
   }
 
   async function loadStudentFees(studentId) {
+    const token = feesRequest.current;
+    setLoadingFees(true);
     try {
       const q = query(collection(db, 'fees'), where('studentId', '==', studentId));
       const snap = await getDocs(q);
+      if (token !== feesRequest.current) return; // superseded by a later selection
       setFees(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     } catch (err) {
       console.error(err);
+    } finally {
+      if (token === feesRequest.current) setLoadingFees(false);
     }
   }
 
@@ -398,13 +429,17 @@ export default function FeeForm() {
           <div className="section-title">
             <h2>Fee Records for {students.find((s) => s.id === selectedStudent)?.name}</h2>
           </div>
-          {fees.length === 0 ? (
+          {loadingFees ? (
+            <div className="spinner-overlay" style={{ minHeight: 100 }}>
+              <div className="spinner"></div>
+            </div>
+          ) : sortedFees.length === 0 ? (
             <div className="empty-state" style={{ padding: 24 }}>
               <p>No fee records for this student</p>
             </div>
           ) : (
             <div className="stagger-list">
-              {fees.map((fee) => {
+              {sortedFees.map((fee) => {
                 const dueLabel = !fee.paid ? getDueLabel(fee.dueDate) : null;
                 const isEditing = editFeeId === fee.id;
 

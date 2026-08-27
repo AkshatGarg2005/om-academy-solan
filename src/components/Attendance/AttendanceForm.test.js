@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import AttendanceForm from './AttendanceForm';
 import { useAuth } from '../../contexts/AuthContext';
@@ -177,6 +177,41 @@ describe('AttendanceForm — marking', () => {
 });
 
 describe('AttendanceForm — batch selection', () => {
+  test('a roster response that arrives after a batch switch is discarded', async () => {
+    useAuth.mockReturnValue({ currentUser: { uid: 'admin1' }, isAdmin: true });
+    loadBatches.mockResolvedValue([
+      { id: 'b1', name: 'Morning', timing: '8-10' },
+      { id: 'b2', name: 'Evening', timing: '5-7' },
+    ]);
+    commitInChunks.mockResolvedValue(undefined);
+
+    let releaseMorning;
+    getDocs
+      .mockImplementationOnce(() => new Promise((r) => { releaseMorning = r; })) // Morning roster
+      .mockResolvedValueOnce(asSnap([                                            // Evening roster
+        { id: 's9', name: 'Evening Only', teacherIds: [], batchIds: ['b2'] },
+      ]))
+      .mockResolvedValue(asSnap([]));                                            // attendance reads
+
+    render(<AttendanceForm />);
+    await screen.findByRole('option', { name: /Morning/ });
+
+    const select = document.getElementById('att-batch');
+    await userEvent.selectOptions(select, 'b1');
+    await userEvent.selectOptions(select, 'b2');
+    await waitFor(() => expect(screen.getByText('Evening Only')).toBeInTheDocument());
+
+    // Morning's roster now lands, after the selection moved on. Applying it
+    // would list Morning's students while selectedBatch is Evening, and saving
+    // would write them under the Evening batch id.
+    await act(async () => { releaseMorning(asSnap(IN_BATCH)); });
+
+    expect(screen.getByText('Evening Only')).toBeInTheDocument();
+    expect(screen.queryByText('Aarav Sharma')).not.toBeInTheDocument();
+    expect(summary()).toHaveTextContent('1/1 Present');
+  });
+
+
   test('clearing the batch clears the roster', async () => {
     setup({ isAdmin: true, uid: 'admin1' });
     render(<AttendanceForm />);

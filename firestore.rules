@@ -102,14 +102,23 @@ service cloud.firestore {
 
     match /batches/{batchId} {
       allow read: if isSignedIn();
-      allow create, update, delete: if isStaff();
+      allow create, update: if isStaff();
+
+      // Delete is admin-only. Removing a batch also has to strip its id from
+      // every student's batchIds, and a teacher can neither see nor write
+      // students outside their own roster — so a teacher's delete would leave
+      // everyone else's students referencing a batch that no longer exists.
+      allow delete: if isAdmin();
     }
 
     // ─── Courses Collection ─────────────────────────────────
 
     match /courses/{courseId} {
       allow read: if isSignedIn();
-      allow create, update, delete: if isStaff();
+      allow create, update: if isStaff();
+
+      // Admin-only for the same reason as batches above.
+      allow delete: if isAdmin();
     }
 
     // ─── Test Reports Collection ────────────────────────────
