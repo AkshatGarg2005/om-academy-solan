@@ -10,6 +10,7 @@ import {
   HiOutlineTrash, HiOutlineCheck, HiOutlineX, HiOutlineSearch,
 } from 'react-icons/hi';
 import { getInitials, formatDate } from '../../utils/helpers';
+import SearchableSelect from '../common/SearchableSelect';
 
 export default function FeeForm() {
   const { currentUser, isAdmin } = useAuth();
@@ -29,9 +30,9 @@ export default function FeeForm() {
   const [editDueDate, setEditDueDate] = useState('');
   const [editAmount, setEditAmount] = useState('');
   const [saving, setSaving] = useState(false);
-  // Search
+  // Search over the pending list. The student picker keeps its own query
+  // inside the dropdown.
   const [search, setSearch] = useState('');
-  const [studentSearch, setStudentSearch] = useState('');
 
   // Derived from pendingFees so that adding, editing, paying or deleting a fee
   // can update local state instead of refetching the roster and every unpaid fee.
@@ -59,18 +60,6 @@ export default function FeeForm() {
       student.name?.toLowerCase().includes(q) || student.email?.toLowerCase().includes(q)
     );
   }, [pendingByStudent, search]);
-
-  const filteredStudents = useMemo(() => {
-    const q = studentSearch.trim().toLowerCase();
-    if (!q) return students;
-    // The selected student always stays in the list, so narrowing the search
-    // cannot blank out the picker's current value.
-    return students.filter((s) =>
-      s.id === selectedStudent ||
-      s.name?.toLowerCase().includes(q) ||
-      s.email?.toLowerCase().includes(q)
-    );
-  }, [students, studentSearch, selectedStudent]);
 
   const pendingTotal = pendingByStudent.reduce((sum, s) => sum + s.totalAmount, 0);
   const filteredTotal = filteredPending.reduce((sum, s) => sum + s.totalAmount, 0);
@@ -364,28 +353,15 @@ export default function FeeForm() {
         <form onSubmit={handleAdd}>
           <div className="form-group">
             <label className="form-label">Student</label>
-            <div style={{ position: 'relative', marginBottom: 8 }}>
-              <HiOutlineSearch style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--gray-400)', fontSize: '0.875rem' }} />
-              <input
-                type="text" placeholder="Search student..."
-                value={studentSearch} onChange={(e) => setStudentSearch(e.target.value)}
-                id="fee-student-search"
-                style={{
-                  width: '100%', padding: '8px 10px 8px 32px', fontSize: '0.8125rem',
-                  border: '1px solid var(--gray-200)', borderRadius: 'var(--radius-md)',
-                  background: 'var(--white)', outline: 'none',
-                }}
-              />
-            </div>
-            <select
-              className="form-input" value={selectedStudent}
-              onChange={(e) => setSelectedStudent(e.target.value)} id="fee-student"
-            >
-              <option value="">Select student</option>
-              {filteredStudents.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
+            <SearchableSelect
+              id="fee-student"
+              options={students}
+              value={selectedStudent}
+              onChange={setSelectedStudent}
+              placeholder="Select student"
+              searchPlaceholder="Search student..."
+              emptyLabel="No students found"
+            />
           </div>
           <div className="form-row">
             <div className="form-group">

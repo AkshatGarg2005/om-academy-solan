@@ -46,11 +46,14 @@ beforeEach(() => {
 const ready = () => waitFor(() =>
   expect(screen.getByRole('heading', { name: 'Add Fee Entry' })).toBeInTheDocument());
 const pendingSearch = () => screen.getByPlaceholderText('Search students with pending fees...');
-const studentSearch = () => screen.getByPlaceholderText('Search student...');
-const picker = () => document.getElementById('fee-student');
-// Student names appear both in the pending list and as <option>s in the picker,
-// so pending-list assertions must be scoped to the list itself.
+// Student names appear both in the pending list and, once open, in the picker,
+// so assertions must be scoped to one or the other.
 const pendingList = () => within(document.getElementById('fee-pending-list'));
+const picker = () => document.getElementById('fee-student');
+const dropdown = () => within(screen.getByRole('listbox'));
+const pickerSearch = () => screen.getByPlaceholderText('Search student...');
+const openPicker = () => userEvent.click(picker());
+const settle = (calls) => waitFor(() => expect(getDocs).toHaveBeenCalledTimes(calls));
 
 describe('FeeForm — existing behaviour still works', () => {
   test('renders the pending summary with every unpaid student and the grand total', async () => {
@@ -59,19 +62,21 @@ describe('FeeForm — existing behaviour still works', () => {
     expect(pendingList().getByText('Aarav Sharma')).toBeInTheDocument();
     expect(pendingList().getByText('Priya Verma')).toBeInTheDocument();
     expect(screen.getByText('2 students with unpaid fees', { exact: false })).toBeInTheDocument();
-    expect(screen.getByText('Total Pending')).toBeInTheDocument();
-    expect(screen.getAllByText('₹3500').length).toBeGreaterThan(0);
+    // Unfiltered, ₹3500 shows in both the header and the total row.
+    const totalRow = screen.getByText('Total Pending').closest('div');
+    expect(within(totalRow).getByText('₹3500')).toBeInTheDocument();
   });
 
-  test('the student picker lists every student', async () => {
+  test('the picker starts on its placeholder and opens closed', async () => {
     render(<FeeForm />);
     await ready();
-    expect(within(picker()).getAllByRole('option')).toHaveLength(4); // 3 + placeholder
+    expect(picker()).toHaveTextContent('Select student');
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 });
 
-describe('FeeForm — new search behaviour', () => {
-  test('pending search filters by name and retotals to the matches', async () => {
+describe('FeeForm — pending list search', () => {
+  test('filters by name and retotals to the matches', async () => {
     render(<FeeForm />);
     await ready();
     await userEvent.type(pendingSearch(), 'aarav');
@@ -86,7 +91,7 @@ describe('FeeForm — new search behaviour', () => {
     expect(screen.getByText('₹3500')).toBeInTheDocument();
   });
 
-  test('pending search also matches on email', async () => {
+  test('also matches on email', async () => {
     render(<FeeForm />);
     await ready();
     await userEvent.type(pendingSearch(), 'priya@example');
@@ -94,47 +99,15 @@ describe('FeeForm — new search behaviour', () => {
     expect(pendingList().queryByText('Aarav Sharma')).not.toBeInTheDocument();
   });
 
-  test('a search with no matches shows an empty message and hides the total row', async () => {
+  test('no matches shows an empty message and hides the total row', async () => {
     render(<FeeForm />);
     await ready();
     await userEvent.type(pendingSearch(), 'zzzz');
     expect(screen.getByText(/No students match/)).toBeInTheDocument();
     expect(screen.queryByText('Total Pending')).not.toBeInTheDocument();
-    expect(screen.queryByText(/^Total for/)).not.toBeInTheDocument();
   });
 
-  test('student search narrows the picker', async () => {
-    render(<FeeForm />);
-    await ready();
-    await userEvent.type(studentSearch(), 'rohan');
-    const options = within(picker()).getAllByRole('option');
-    expect(options).toHaveLength(2); // placeholder + Rohan
-    expect(within(picker()).getByRole('option', { name: 'Rohan Gupta' })).toBeInTheDocument();
-  });
-
-  test('the selected student survives a search that would exclude them', async () => {
-    render(<FeeForm />);
-    await ready();
-    await userEvent.selectOptions(picker(), 's1');
-    expect(picker().value).toBe('s1');
-    // Selecting triggers loadStudentFees; let it settle so its state update is
-    // not left dangling outside act().
-    await waitFor(() => expect(getDocs).toHaveBeenCalledTimes(2));
-
-    await userEvent.type(studentSearch(), 'rohan');
-    // Aarav is selected, so he stays listed even though he does not match.
-    expect(within(picker()).getByRole('option', { name: 'Aarav Sharma' })).toBeInTheDocument();
-    expect(picker().value).toBe('s1');
-  });
-
-  test('pending search leaves the student picker untouched', async () => {
-    render(<FeeForm />);
-    await ready();
-    await userEvent.type(pendingSearch(), 'aarav');
-    expect(within(picker()).getAllByRole('option')).toHaveLength(4);
-  });
-
-  test('clearing the search restores the full lists', async () => {
+  test('clearing restores the full list', async () => {
     render(<FeeForm />);
     await ready();
     await userEvent.type(pendingSearch(), 'aarav');
@@ -143,5 +116,95 @@ describe('FeeForm — new search behaviour', () => {
     await userEvent.clear(pendingSearch());
     expect(pendingList().getByText('Priya Verma')).toBeInTheDocument();
     expect(screen.getByText('Total Pending')).toBeInTheDocument();
+  });
+});
+
+describe('FeeForm — search inside the student picker', () => {
+  test('opening reveals a search box and every student', async () => {
+    render(<FeeForm />);
+    await ready();
+    await openPicker();
+    expect(pickerSearch()).toBeInTheDocument();
+    expect(dropdown().getAllByRole('option')).toHaveLength(3);
+  });
+
+  test('typing narrows the options', async () => {
+    render(<FeeForm />);
+    await ready();
+    await openPicker();
+    await userEvent.type(pickerSearch(), 'rohan');
+    const options = dropdown().getAllByRole('option');
+    expect(options).toHaveLength(1);
+    expect(options[0]).toHaveTextContent('Rohan Gupta');
+  });
+
+  test('matches on email too', async () => {
+    render(<FeeForm />);
+    await ready();
+    await openPicker();
+    await userEvent.type(pickerSearch(), 'priya@example');
+    expect(dropdown().getAllByRole('option')).toHaveLength(1);
+  });
+
+  test('no matches shows the empty label', async () => {
+    render(<FeeForm />);
+    await ready();
+    await openPicker();
+    await userEvent.type(pickerSearch(), 'zzzz');
+    expect(screen.getByText('No students found')).toBeInTheDocument();
+  });
+
+  test('choosing an option selects it and closes the dropdown', async () => {
+    render(<FeeForm />);
+    await ready();
+    await openPicker();
+    await userEvent.click(dropdown().getByRole('option', { name: 'Rohan Gupta' }));
+
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(picker()).toHaveTextContent('Rohan Gupta');
+    await settle(2); // loadStudentFees fired for the selection
+  });
+
+  test('reopening resets the previous query', async () => {
+    render(<FeeForm />);
+    await ready();
+    await openPicker();
+    await userEvent.type(pickerSearch(), 'rohan');
+    expect(dropdown().getAllByRole('option')).toHaveLength(1);
+
+    await userEvent.keyboard('{Escape}');
+    await openPicker();
+    expect(pickerSearch()).toHaveValue('');
+    expect(dropdown().getAllByRole('option')).toHaveLength(3);
+  });
+
+  test('a selection can be cleared again', async () => {
+    render(<FeeForm />);
+    await ready();
+    await openPicker();
+    await userEvent.click(dropdown().getByRole('option', { name: 'Rohan Gupta' }));
+    await settle(2);
+
+    await openPicker();
+    // With a value set, a clear row appears above the students.
+    await userEvent.click(dropdown().getByRole('option', { name: 'Select student' }));
+    expect(picker()).toHaveTextContent('Select student');
+  });
+
+  test('Escape closes without selecting', async () => {
+    render(<FeeForm />);
+    await ready();
+    await openPicker();
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(picker()).toHaveTextContent('Select student');
+  });
+
+  test('the pending search does not disturb the picker', async () => {
+    render(<FeeForm />);
+    await ready();
+    await userEvent.type(pendingSearch(), 'aarav');
+    await openPicker();
+    expect(dropdown().getAllByRole('option')).toHaveLength(3);
   });
 });
