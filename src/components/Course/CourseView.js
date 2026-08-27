@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../../config/firebase';
+import { getDocsByIds } from '../../utils/firestore';
 import { HiOutlineAcademicCap } from 'react-icons/hi';
 
 export default function CourseView() {
@@ -15,20 +14,8 @@ export default function CourseView() {
 
   async function loadCourses() {
     try {
-      const courseIds = userProfile?.courseIds || [];
-      if (courseIds.length === 0) {
-        setCourses([]);
-        setLoading(false);
-        return;
-      }
-      const courseList = [];
-      for (const cid of courseIds) {
-        const snap = await getDoc(doc(db, 'courses', cid));
-        if (snap.exists()) {
-          courseList.push({ id: snap.id, ...snap.data() });
-        }
-      }
-      setCourses(courseList);
+      // Fetched in a single query rather than one getDoc per enrolled course.
+      setCourses(await getDocsByIds('courses', userProfile?.courseIds || []));
     } catch (err) {
       console.error('Error loading courses:', err);
     } finally {

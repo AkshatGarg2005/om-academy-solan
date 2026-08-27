@@ -1,0 +1,143 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helper Functions ───────────────────────────────────
+    //
+    // Every get() below is billed as a document read, so these helpers are
+    // written to perform as few lookups as possible. Order the clauses at each
+    // call site so the cheap checks (isOwner, isSignedIn) run first.
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && getUserRole() == 'admin';
+    }
+
+    function isTeacher() {
+      return isSignedIn() && getUserRole() == 'teacher';
+    }
+
+    // One role lookup rather than two. `isAdmin() || isTeacher()` would call
+    // getUserRole() once per branch.
+    function isStaff() {
+      return isSignedIn() && getUserRole() in ['admin', 'teacher'];
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // ─── Users Collection ───────────────────────────────────
+
+    match /users/{userId} {
+      // Split into two independent allow rules rather than one OR.
+      //
+      // Reading your own profile is the app's cold-start path: AuthContext
+      // fetches it before anything renders. Matching it with `get` alone means
+      // isOwner() settles the decision from the path variable, with no billed
+      // get() on the very document being read. Folding this into a single
+      // `isOwner(userId) || isStaff()` would not work — on a staff *list* query
+      // the wildcard is unbound, so that clause is indeterminate.
+      allow get: if isOwner(userId);
+
+      // Staff read everything, get and list alike (needed for roster queries).
+      allow read: if isStaff();
+
+      // Self-registration (students only)
+      allow create: if isSignedIn() && isOwner(userId) &&
+        request.resource.data.role == 'student';
+
+      // Staff can create users (teachers add students, admin adds teachers)
+      // TODO(security): this permits a teacher to create a user document with
+      // role 'admin'. Constrain it — teachers to role == 'student', admins to
+      // role in ['student', 'teacher'].
+      allow create: if isStaff();
+
+      // Users can update own non-role, non-teacherIds fields
+      allow update: if isOwner(userId) &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.teacherIds == resource.data.teacherIds;
+
+      // Admin can update anything
+      allow update: if isAdmin();
+
+      // Teachers can update their assigned students (no role/teacherIds changes)
+      // TODO(security): this matches any student, not only assigned ones. Add
+      // `request.auth.uid in resource.data.teacherIds`.
+      allow update: if isTeacher() &&
+        resource.data.role == 'student' &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.teacherIds == resource.data.teacherIds;
+
+      // Only admin can delete users
+      allow delete: if isAdmin();
+    }
+
+    // ─── Batches Collection ─────────────────────────────────
+
+    match /batches/{batchId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isStaff();
+    }
+
+    // ─── Courses Collection ─────────────────────────────────
+
+    match /courses/{courseId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isStaff();
+    }
+
+    // ─── Test Reports Collection ────────────────────────────
+
+    match /testReports/{reportId} {
+      // Staff can read all, students only their own.
+      // NOTE: putting `resource.data.studentId == request.auth.uid` first would
+      // save students a billed role lookup, but on unfiltered staff queries that
+      // clause is indeterminate and the OR relies on CEL error absorption to
+      // still resolve via isStaff(). Validate in the emulator before reordering
+      // — a mistake here breaks every staff list query.
+      allow read: if isSignedIn() && (
+        isStaff() || resource.data.studentId == request.auth.uid
+      );
+
+      allow create: if isStaff();
+      allow update, delete: if isAdmin() ||
+        (isTeacher() && resource.data.createdBy == request.auth.uid);
+    }
+
+    // ─── Attendance Collection ──────────────────────────────
+
+    match /attendance/{recordId} {
+      // Staff can read all, students only their own. See the ordering note on
+      // testReports before changing the clause order here.
+      allow read: if isSignedIn() && (
+        isStaff() || resource.data.studentId == request.auth.uid
+      );
+
+      allow create: if isStaff();
+      allow update: if isStaff();
+      allow delete: if isAdmin();
+    }
+
+    // ─── Fees Collection ────────────────────────────────────
+
+    match /fees/{feeId} {
+      // Staff can read all, students only their own. See the ordering note on
+      // testReports before changing the clause order here.
+      allow read: if isSignedIn() && (
+        isStaff() || resource.data.studentId == request.auth.uid
+      );
+
+      allow create: if isStaff();
+      allow update: if isStaff();
+      allow delete: if isAdmin();
+    }
+  }
+}

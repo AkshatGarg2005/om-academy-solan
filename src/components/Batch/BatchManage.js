@@ -55,15 +55,16 @@ export default function BatchManage() {
     e.preventDefault();
     if (!name.trim()) { toast.error('Batch name required'); return; }
     try {
-      await addDoc(collection(db, 'batches'), {
-        name: name.trim(),
-        timing: timing.trim(),
+      const batch = { name: name.trim(), timing: timing.trim() };
+      const ref = await addDoc(collection(db, 'batches'), {
+        ...batch,
         createdAt: serverTimestamp(),
       });
+      // Append locally rather than refetching every batch and student.
+      setBatches((prev) => [...prev, { id: ref.id, ...batch }]);
       toast.success('Batch created!');
       setName('');
       setTiming('');
-      loadData();
     } catch (err) {
       toast.error('Failed to create batch');
     }
@@ -78,9 +79,17 @@ export default function BatchManage() {
       );
       ops.push(deleteDoc(doc(db, 'batches', batchId)));
       await Promise.all(ops);
+      // Mirror the change locally rather than refetching everything.
+      setBatches((prev) => prev.filter((b) => b.id !== batchId));
+      setStudents((prev) =>
+        prev.map((s) =>
+          (s.batchIds || []).includes(batchId)
+            ? { ...s, batchIds: s.batchIds.filter((id) => id !== batchId) }
+            : s
+        )
+      );
       toast.success('Batch deleted');
       if (manageBatch === batchId) setManageBatch(null);
-      loadData();
     } catch (err) {
       toast.error('Failed to delete');
     }
@@ -102,13 +111,11 @@ export default function BatchManage() {
     if (!editName.trim()) { toast.error('Batch name required'); return; }
     setSaving(true);
     try {
-      await updateDoc(doc(db, 'batches', batchId), {
-        name: editName.trim(),
-        timing: editTiming.trim(),
-      });
+      const updated = { name: editName.trim(), timing: editTiming.trim() };
+      await updateDoc(doc(db, 'batches', batchId), updated);
+      setBatches((prev) => prev.map((b) => (b.id === batchId ? { ...b, ...updated } : b)));
       toast.success('Batch updated!');
       setEditBatch(null);
-      loadData();
     } catch (err) {
       toast.error('Failed to update batch');
     } finally {
@@ -143,9 +150,15 @@ export default function BatchManage() {
       await Promise.all(
         ids.map((sid) => updateDoc(doc(db, 'users', sid), { batchIds: arrayUnion(batchId) }))
       );
+      setStudents((prev) =>
+        prev.map((s) =>
+          ids.includes(s.id) && !(s.batchIds || []).includes(batchId)
+            ? { ...s, batchIds: [...(s.batchIds || []), batchId] }
+            : s
+        )
+      );
       toast.success(`${ids.length} student${ids.length > 1 ? 's' : ''} added to batch!`);
       setSelectedToAdd({});
-      loadData();
     } catch (err) {
       toast.error('Failed to add students');
     } finally {
@@ -162,9 +175,15 @@ export default function BatchManage() {
       await Promise.all(
         ids.map((sid) => updateDoc(doc(db, 'users', sid), { batchIds: arrayRemove(batchId) }))
       );
+      setStudents((prev) =>
+        prev.map((s) =>
+          ids.includes(s.id)
+            ? { ...s, batchIds: (s.batchIds || []).filter((id) => id !== batchId) }
+            : s
+        )
+      );
       toast.success(`${ids.length} student${ids.length > 1 ? 's' : ''} removed!`);
       setSelectedToRemove({});
-      loadData();
     } catch (err) {
       toast.error('Failed to remove students');
     } finally {

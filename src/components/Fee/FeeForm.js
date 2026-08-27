@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -20,7 +20,7 @@ export default function FeeForm() {
   const [loading, setLoading] = useState(true);
   const [fees, setFees] = useState([]);
   const [adding, setAdding] = useState(false);
-  const [pendingByStudent, setPendingByStudent] = useState([]);
+  const [pendingFees, setPendingFees] = useState([]);
   const [showPending, setShowPending] = useState(true);
   // Edit state
   const [editFeeId, setEditFeeId] = useState(null);
@@ -28,6 +28,25 @@ export default function FeeForm() {
   const [editDueDate, setEditDueDate] = useState('');
   const [editAmount, setEditAmount] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // Derived from pendingFees so that adding, editing, paying or deleting a fee
+  // can update local state instead of refetching the roster and every unpaid fee.
+  const pendingByStudent = useMemo(() => {
+    const grouped = {};
+    pendingFees.forEach((fee) => {
+      if (!grouped[fee.studentId]) {
+        const student = students.find((s) => s.id === fee.studentId);
+        grouped[fee.studentId] = {
+          student: student || { id: fee.studentId, name: 'Unknown' },
+          fees: [],
+          totalAmount: 0,
+        };
+      }
+      grouped[fee.studentId].fees.push(fee);
+      grouped[fee.studentId].totalAmount += (fee.amount || 0);
+    });
+    return Object.values(grouped);
+  }, [pendingFees, students]);
 
   useEffect(() => {
     loadInitialData();
@@ -53,24 +72,8 @@ export default function FeeForm() {
         getDocs(studentsQuery),
         getDocs(query(collection(db, 'fees'), where('paid', '==', false))),
       ]);
-      const studentList = studentsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setStudents(studentList);
-
-      const pendingFees = feesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const grouped = {};
-      pendingFees.forEach((fee) => {
-        if (!grouped[fee.studentId]) {
-          const student = studentList.find((s) => s.id === fee.studentId);
-          grouped[fee.studentId] = {
-            student: student || { id: fee.studentId, name: 'Unknown' },
-            fees: [],
-            totalAmount: 0,
-          };
-        }
-        grouped[fee.studentId].fees.push(fee);
-        grouped[fee.studentId].totalAmount += (fee.amount || 0);
-      });
-      setPendingByStudent(Object.values(grouped));
+      setStudents(studentsSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setPendingFees(feesSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
     } catch (err) {
       console.error(err);
     } finally {
@@ -96,21 +99,25 @@ export default function FeeForm() {
     }
     setAdding(true);
     try {
-      await addDoc(collection(db, 'fees'), {
+      const fee = {
         studentId: selectedStudent,
         month: month.trim(),
         dueDate: dueDate || '',
         amount: Number(amount) || 0,
         paid: false,
+      };
+      const ref = await addDoc(collection(db, 'fees'), {
+        ...fee,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+      const added = { id: ref.id, ...fee };
+      setFees((prev) => [...prev, added]);
+      setPendingFees((prev) => [...prev, added]);
       toast.success('Fee record added');
       setMonth('');
       setDueDate('');
       setAmount('');
-      loadStudentFees(selectedStudent);
-      loadInitialData();
     } catch (err) {
       toast.error('Failed to add fee');
     } finally {
@@ -125,10 +132,16 @@ export default function FeeForm() {
         updatedAt: serverTimestamp(),
       });
       toast.success(currentPaid ? 'Marked as unpaid' : 'Marked as paid');
+      const toggled = fees.find((f) => f.id === feeId);
       setFees((prev) =>
         prev.map((f) => (f.id === feeId ? { ...f, paid: !currentPaid } : f))
       );
-      loadInitialData();
+      // A fee that was paid becomes pending again, and vice versa.
+      setPendingFees((prev) =>
+        currentPaid
+          ? [...prev, { ...toggled, paid: false }]
+          : prev.filter((f) => f.id !== feeId)
+      );
     } catch (err) {
       toast.error('Failed to update');
     }
@@ -153,16 +166,17 @@ export default function FeeForm() {
     if (!editMonth.trim()) { toast.error('Month is required'); return; }
     setSaving(true);
     try {
-      await updateDoc(doc(db, 'fees', feeId), {
+      const updated = {
         month: editMonth.trim(),
         dueDate: editDueDate || '',
         amount: Number(editAmount) || 0,
-        updatedAt: serverTimestamp(),
-      });
+      };
+      await updateDoc(doc(db, 'fees', feeId), { ...updated, updatedAt: serverTimestamp() });
+      const applyEdit = (list) => list.map((f) => (f.id === feeId ? { ...f, ...updated } : f));
+      setFees(applyEdit);
+      setPendingFees(applyEdit);
       toast.success('Fee entry updated');
       setEditFeeId(null);
-      loadStudentFees(selectedStudent);
-      loadInitialData();
     } catch (err) {
       toast.error('Failed to update');
     } finally {
@@ -176,8 +190,9 @@ export default function FeeForm() {
     try {
       await deleteDoc(doc(db, 'fees', feeId));
       toast.success('Fee entry deleted');
-      setFees((prev) => prev.filter((f) => f.id !== feeId));
-      loadInitialData();
+      const removeFee = (list) => list.filter((f) => f.id !== feeId);
+      setFees(removeFee);
+      setPendingFees(removeFee);
     } catch (err) {
       toast.error('Failed to delete');
     }

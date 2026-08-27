@@ -103,8 +103,9 @@ export default function AllStudents() {
       feeSnap.docs.forEach((d) => deletes.push(deleteDoc(doc(db, 'fees', d.id))));
       deletes.push(deleteDoc(doc(db, 'users', studentId)));
       await Promise.all(deletes);
+      // Drop from local state rather than refetching the roster and batches.
+      setStudents((prev) => prev.filter((s) => s.id !== studentId));
       toast.success(`${studentName} deleted`);
-      loadData();
     } catch (err) {
       console.error(err);
       toast.error('Failed to delete student');
@@ -147,7 +148,7 @@ export default function AllStudents() {
       await signOut(secondaryAuth);
 
       // Create Firestore user document
-      await setDoc(doc(db, 'users', cred.user.uid), {
+      const student = {
         name: form.name.trim(),
         studentPhone: form.studentPhone.trim(),
         email: form.email.trim(),
@@ -165,15 +166,19 @@ export default function AllStudents() {
         teacherIds: isAdmin ? [] : [currentUser.uid],
         batchIds: [],
         courseIds: [],
+      };
+      await setDoc(doc(db, 'users', cred.user.uid), {
+        ...student,
         createdAt: serverTimestamp(),
       });
 
       // Clean up secondary app
       await deleteApp(secondaryApp);
 
+      // Append locally rather than refetching the roster and batches.
+      setStudents((prev) => [...prev, { id: cred.user.uid, ...student }]);
       toast.success(`${form.name.trim()} added successfully!`);
       resetAddForm();
-      loadData();
     } catch (err) {
       console.error(err);
       if (err.code === 'auth/email-already-in-use') {

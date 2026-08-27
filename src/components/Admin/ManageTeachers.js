@@ -4,6 +4,7 @@ import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth'
 import { collection, query, where, getDocs, doc, setDoc, deleteDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db, firebaseConfig } from '../../config/firebase';
 import { getInitials } from '../../utils/helpers';
+import { countDocs } from '../../utils/firestore';
 import toast from 'react-hot-toast';
 import {
   HiOutlinePlus, HiOutlineTrash, HiOutlineX, HiOutlineSearch,
@@ -34,14 +35,20 @@ export default function ManageTeachers() {
     try {
       const snap = await getDocs(query(collection(db, 'users'), where('role', '==', 'teacher')));
       const teacherList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      // For each teacher, count assigned students
-      const studentsSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'student')));
-      const allStudents = studentsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const enriched = teacherList.map((t) => ({
-        ...t,
-        studentCount: allStudents.filter((s) => (s.teacherIds || []).includes(t.id)).length,
-      }));
-      setTeachers(enriched);
+      // Count each teacher's students server-side, rather than downloading the
+      // entire student roster just to tally it here.
+      const studentCounts = await Promise.all(
+        teacherList.map((t) =>
+          countDocs(
+            query(
+              collection(db, 'users'),
+              where('role', '==', 'student'),
+              where('teacherIds', 'array-contains', t.id)
+            )
+          )
+        )
+      );
+      setTeachers(teacherList.map((t, i) => ({ ...t, studentCount: studentCounts[i] })));
     } catch (err) {
       console.error(err);
     } finally {
@@ -73,20 +80,24 @@ export default function ManageTeachers() {
       const cred = await createUserWithEmailAndPassword(secondaryAuth, form.email.trim(), form.password);
       await signOut(secondaryAuth);
 
-      await setDoc(doc(db, 'users', cred.user.uid), {
+      const teacher = {
         name: form.name.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
         subject: form.subject.trim(),
         role: 'teacher',
+      };
+      await setDoc(doc(db, 'users', cred.user.uid), {
+        ...teacher,
         createdAt: serverTimestamp(),
       });
 
       await deleteApp(secondaryApp);
 
+      // Append locally rather than reloading and re-counting every teacher.
+      setTeachers((prev) => [...prev, { id: cred.user.uid, ...teacher, studentCount: 0 }]);
       toast.success(`${form.name.trim()} added as teacher!`);
       resetForm();
-      loadTeachers();
     } catch (err) {
       console.error(err);
       if (err.code === 'auth/email-already-in-use') {
@@ -119,16 +130,21 @@ export default function ManageTeachers() {
     if (!editForm.name?.trim()) { toast.error('Name is required'); return; }
     setSaving(true);
     try {
-      await updateDoc(doc(db, 'users', editTeacherId), {
+      const updated = {
         name: editForm.name.trim(),
         phone: editForm.phone.trim(),
         subject: editForm.subject.trim(),
+      };
+      await updateDoc(doc(db, 'users', editTeacherId), {
+        ...updated,
         updatedAt: serverTimestamp(),
       });
+      setTeachers((prev) =>
+        prev.map((t) => (t.id === editTeacherId ? { ...t, ...updated } : t))
+      );
       toast.success('Teacher updated!');
       setEditTeacherId(null);
       setEditForm({});
-      loadTeachers();
     } catch (err) {
       console.error(err);
       toast.error('Failed to update teacher');
@@ -141,8 +157,8 @@ export default function ManageTeachers() {
     if (!window.confirm(`Delete teacher "${teacherName}"?\n\nThis will remove their profile. Their login account must be deleted separately from Firebase Console. Students assigned to them will need reassignment.`)) return;
     try {
       await deleteDoc(doc(db, 'users', teacherId));
+      setTeachers((prev) => prev.filter((t) => t.id !== teacherId));
       toast.success(`${teacherName} removed`);
-      loadTeachers();
     } catch (err) {
       console.error(err);
       toast.error('Failed to delete teacher');

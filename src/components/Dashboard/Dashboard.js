@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { collection, query, where, getDocs, orderBy, limit, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import { db } from '../../config/firebase';
+import { countDocs, countByIds, getDocsByIds } from '../../utils/firestore';
 import { getAttendancePercentage, formatDate, getInitials } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 import {
@@ -38,132 +39,128 @@ export default function Dashboard() {
   async function loadStats() {
     try {
       if (isStaff) {
-        // Admin or Teacher stats
-        let studentsQuery;
-        if (isAdmin) {
-          studentsQuery = query(collection(db, 'users'), where('role', '==', 'student'));
-        } else {
-          // Teacher: only their assigned students
-          studentsQuery = query(
-            collection(db, 'users'),
-            where('role', '==', 'student'),
-            where('teacherIds', 'array-contains', currentUser.uid)
-          );
-        }
-
-        const [usersSnap, feesSnap, testsSnap, attendanceSnap] = await Promise.all([
-          getDocs(studentsQuery),
-          getDocs(query(collection(db, 'fees'), where('paid', '==', false))),
-          getDocs(collection(db, 'testReports')),
-          getDocs(collection(db, 'attendance')),
-        ]);
-
-        // For admin, also count teachers
-        let totalTeachers = 0;
-        if (isAdmin) {
-          const teacherSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'teacher')));
-          totalTeachers = teacherSnap.size;
-        }
-
-        // For teachers, filter fees/tests/attendance to their students only
-        const studentIds = usersSnap.docs.map((d) => d.id);
-        const scopedFees = isAdmin ? feesSnap.size : feesSnap.docs.filter((d) => studentIds.includes(d.data().studentId)).length;
-        const scopedTests = isAdmin ? testsSnap.size : testsSnap.docs.filter((d) => studentIds.includes(d.data().studentId)).length;
-        const scopedAttendance = isAdmin ? attendanceSnap.size : attendanceSnap.docs.filter((d) => studentIds.includes(d.data().studentId)).length;
-
-        setStats({
-          totalTeachers,
-          totalStudents: usersSnap.size,
-          pendingFees: scopedFees,
-          totalTests: scopedTests,
-          totalAttendanceRecords: scopedAttendance,
-          totalCourses: 0,
-          attendancePercent: 0,
-          recentTests: [],
-        });
+        await loadStaffStats();
       } else {
-        // Student stats
-        const testSnap = await getDocs(
-          query(
-            collection(db, 'testReports'),
-            where('studentId', '==', currentUser.uid),
-            orderBy('testDate', 'desc'),
-            limit(5)
-          )
-        );
-        const recentTests = testSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-
-        const attendanceSnap = await getDocs(
-          query(collection(db, 'attendance'), where('studentId', '==', currentUser.uid))
-        );
-        const totalAttendance = attendanceSnap.size;
-        const presentCount = attendanceSnap.docs.filter((d) => d.data().present).length;
-        const attendancePercent = getAttendancePercentage(presentCount, totalAttendance);
-
-        const feesSnap = await getDocs(
-          query(
-            collection(db, 'fees'),
-            where('studentId', '==', currentUser.uid),
-            where('paid', '==', false)
-          )
-        );
-
-        // Find fees due within 7 days or overdue
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const upcomingFees = feesSnap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((f) => {
-            if (!f.dueDate) return false;
-            const due = new Date(f.dueDate);
-            due.setHours(0, 0, 0, 0);
-            const diff = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
-            return diff <= 7; // due within 7 days or overdue
-          });
-
-        const totalCourses = (userProfile?.courseIds || []).length;
-
-        // Fetch batch info (name + timing)
-        const batchIds = userProfile?.batchIds || [];
-        const batchInfo = [];
-        for (const bid of batchIds) {
-          try {
-            const bSnap = await getDoc(doc(db, 'batches', bid));
-            if (bSnap.exists()) {
-              const d = bSnap.data();
-              batchInfo.push({ name: d.name, timing: d.timing || '' });
-            }
-          } catch (e) { /* skip */ }
-        }
-
-        // Fetch course names
-        const courseIds = userProfile?.courseIds || [];
-        const courseNames = [];
-        for (const cid of courseIds) {
-          try {
-            const cSnap = await getDoc(doc(db, 'courses', cid));
-            if (cSnap.exists()) courseNames.push(cSnap.data().name);
-          } catch (e) { /* skip */ }
-        }
-
-        setStats({
-          totalStudents: 0,
-          attendancePercent,
-          totalTests: testSnap.size,
-          totalCourses,
-          totalAttendanceRecords: 0,
-          pendingFees: feesSnap.size,
-          recentTests,
-          batchInfo,
-          courseNames,
-          upcomingFees,
-        });
+        await loadStudentStats();
       }
     } catch (err) {
       console.error('Error loading stats:', err);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function loadStaffStats() {
+    if (isAdmin) {
+      // Every figure here is a plain count, so aggregate them server-side
+      // instead of downloading whole collections just to read their size.
+      const [totalStudents, totalTeachers, pendingFees, totalTests, totalAttendanceRecords] =
+        await Promise.all([
+          countDocs(query(collection(db, 'users'), where('role', '==', 'student'))),
+          countDocs(query(collection(db, 'users'), where('role', '==', 'teacher'))),
+          countDocs(query(collection(db, 'fees'), where('paid', '==', false))),
+          countDocs(collection(db, 'testReports')),
+          countDocs(collection(db, 'attendance')),
+        ]);
+
+      setStats((prev) => ({
+        ...prev,
+        totalTeachers,
+        totalStudents,
+        pendingFees,
+        totalTests,
+        totalAttendanceRecords,
+      }));
+      return;
+    }
+
+    // Teacher: every figure is scoped to their assigned students, so fetch the
+    // student ids once and count the related records by id.
+    const studentsSnap = await getDocs(
+      query(
+        collection(db, 'users'),
+        where('role', '==', 'student'),
+        where('teacherIds', 'array-contains', currentUser.uid)
+      )
+    );
+    const studentIds = studentsSnap.docs.map((d) => d.id);
+
+    const [pendingFees, totalTests, totalAttendanceRecords] = await Promise.all([
+      countByIds('fees', 'studentId', studentIds, where('paid', '==', false)),
+      countByIds('testReports', 'studentId', studentIds),
+      countByIds('attendance', 'studentId', studentIds),
+    ]);
+
+    setStats((prev) => ({
+      ...prev,
+      totalTeachers: 0,
+      totalStudents: studentIds.length,
+      pendingFees,
+      totalTests,
+      totalAttendanceRecords,
+    }));
+  }
+
+  async function loadStudentStats() {
+    const attendanceQuery = query(
+      collection(db, 'attendance'),
+      where('studentId', '==', currentUser.uid)
+    );
+    const batchIds = userProfile?.batchIds || [];
+    const courseIds = userProfile?.courseIds || [];
+
+    // One round trip for everything the student dashboard needs. Attendance and
+    // the test total are counted server-side rather than downloaded in full.
+    const [testSnap, totalTests, totalAttendance, presentCount, feesSnap, batchDocs, courseDocs] =
+      await Promise.all([
+        getDocs(
+          query(
+            collection(db, 'testReports'),
+            where('studentId', '==', currentUser.uid),
+            orderBy('testDate', 'desc'),
+            limit(5)
+          )
+        ),
+        countDocs(query(collection(db, 'testReports'), where('studentId', '==', currentUser.uid))),
+        countDocs(attendanceQuery),
+        countDocs(query(attendanceQuery, where('present', '==', true))),
+        getDocs(
+          query(
+            collection(db, 'fees'),
+            where('studentId', '==', currentUser.uid),
+            where('paid', '==', false)
+          )
+        ),
+        getDocsByIds('batches', batchIds),
+        getDocsByIds('courses', courseIds),
+      ]);
+
+    // Find fees due within 7 days or overdue
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const upcomingFees = feesSnap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((f) => {
+        if (!f.dueDate) return false;
+        const due = new Date(f.dueDate);
+        due.setHours(0, 0, 0, 0);
+        const diff = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
+        return diff <= 7; // due within 7 days or overdue
+      });
+
+    setStats({
+      totalTeachers: 0,
+      totalStudents: 0,
+      attendancePercent: getAttendancePercentage(presentCount, totalAttendance),
+      totalTests,
+      totalCourses: courseIds.length,
+      totalAttendanceRecords: 0,
+      pendingFees: feesSnap.size,
+      recentTests: testSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      batchInfo: batchDocs.map((b) => ({ name: b.name, timing: b.timing || '' })),
+      courseNames: courseDocs.map((c) => c.name),
+      upcomingFees,
+    });
   }
 
   async function handleLogout() {

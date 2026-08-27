@@ -53,15 +53,16 @@ export default function CourseForm() {
     e.preventDefault();
     if (!name.trim()) { toast.error('Course name required'); return; }
     try {
-      await addDoc(collection(db, 'courses'), {
-        name: name.trim(),
-        description: description.trim(),
+      const course = { name: name.trim(), description: description.trim() };
+      const ref = await addDoc(collection(db, 'courses'), {
+        ...course,
         createdAt: serverTimestamp(),
       });
+      // Append locally rather than refetching every course and student.
+      setCourses((prev) => [...prev, { id: ref.id, ...course }]);
       toast.success('Course added!');
       setName('');
       setDescription('');
-      loadData();
     } catch (err) {
       toast.error('Failed to add course');
     }
@@ -72,12 +73,22 @@ export default function CourseForm() {
     try {
       // Remove courseId from all students
       const studentsWithCourse = students.filter((s) => (s.courseIds || []).includes(courseId));
-      for (const s of studentsWithCourse) {
-        await updateDoc(doc(db, 'users', s.id), { courseIds: arrayRemove(courseId) });
-      }
-      await deleteDoc(doc(db, 'courses', courseId));
+      await Promise.all([
+        ...studentsWithCourse.map((s) =>
+          updateDoc(doc(db, 'users', s.id), { courseIds: arrayRemove(courseId) })
+        ),
+        deleteDoc(doc(db, 'courses', courseId)),
+      ]);
+      // Mirror the change locally rather than refetching everything.
+      setCourses((prev) => prev.filter((c) => c.id !== courseId));
+      setStudents((prev) =>
+        prev.map((s) =>
+          (s.courseIds || []).includes(courseId)
+            ? { ...s, courseIds: s.courseIds.filter((id) => id !== courseId) }
+            : s
+        )
+      );
       toast.success('Course deleted');
-      loadData();
     } catch (err) {
       toast.error('Failed to delete');
     }
@@ -99,13 +110,11 @@ export default function CourseForm() {
     if (!editName.trim()) { toast.error('Course name required'); return; }
     setSaving(true);
     try {
-      await updateDoc(doc(db, 'courses', courseId), {
-        name: editName.trim(),
-        description: editDesc.trim(),
-      });
+      const updated = { name: editName.trim(), description: editDesc.trim() };
+      await updateDoc(doc(db, 'courses', courseId), updated);
+      setCourses((prev) => prev.map((c) => (c.id === courseId ? { ...c, ...updated } : c)));
       toast.success('Course updated!');
       setEditCourse(null);
-      loadData();
     } catch (err) {
       toast.error('Failed to update course');
     } finally {
@@ -119,10 +128,16 @@ export default function CourseForm() {
       await updateDoc(doc(db, 'users', enrollStudentId), {
         courseIds: arrayUnion(courseId),
       });
+      setStudents((prev) =>
+        prev.map((s) =>
+          s.id === enrollStudentId && !(s.courseIds || []).includes(courseId)
+            ? { ...s, courseIds: [...(s.courseIds || []), courseId] }
+            : s
+        )
+      );
       toast.success('Student enrolled!');
       setShowEnroll(null);
       setEnrollStudentId('');
-      loadData();
     } catch (err) {
       toast.error('Failed to enroll');
     }
@@ -133,8 +148,14 @@ export default function CourseForm() {
       await updateDoc(doc(db, 'users', studentId), {
         courseIds: arrayRemove(courseId),
       });
+      setStudents((prev) =>
+        prev.map((s) =>
+          s.id === studentId
+            ? { ...s, courseIds: (s.courseIds || []).filter((id) => id !== courseId) }
+            : s
+        )
+      );
       toast.success('Student removed from course');
-      loadData();
     } catch (err) {
       toast.error('Failed to unenroll');
     }
