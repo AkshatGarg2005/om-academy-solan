@@ -27,6 +27,13 @@ export default function AttendanceForm() {
   useEffect(() => {
     if (selectedBatch) {
       loadBatchStudents(selectedBatch);
+    } else {
+      // Going back to "Select batch" has to clear the roster too, otherwise the
+      // previous batch's students stay on screen under a blank selection.
+      setStudents([]);
+      setAttendance({});
+      setExistingRecords({});
+      setIsUpdate(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBatch]);
@@ -46,22 +53,11 @@ export default function AttendanceForm() {
   async function loadBatchStudents(batchId) {
     setLoading(true);
     try {
-      let q;
-      if (isAdmin) {
-        q = query(
-          collection(db, 'users'),
-          where('role', '==', 'student'),
-          where('batchIds', 'array-contains', batchId)
-        );
-      } else {
-        // Teacher: students in this batch who are also assigned to this teacher
-        q = query(
-          collection(db, 'users'),
-          where('role', '==', 'student'),
-          where('batchIds', 'array-contains', batchId)
-        );
-      }
-      const snap = await getDocs(q);
+      const snap = await getDocs(query(
+        collection(db, 'users'),
+        where('role', '==', 'student'),
+        where('batchIds', 'array-contains', batchId)
+      ));
       let studentList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       // For teachers, filter to only their assigned students
       if (!isAdmin) {
@@ -171,7 +167,11 @@ export default function AttendanceForm() {
     }
   }
 
-  const presentCount = Object.values(attendance).filter(Boolean).length;
+  // Counted over the students actually listed. `attendance` can carry extra
+  // entries — records for students in the batch but assigned to another teacher,
+  // or students since removed from the batch — and counting those made the
+  // summary read impossible things like "20/5 Present".
+  const presentCount = students.filter((s) => attendance[s.id] ?? true).length;
 
   return (
     <div className="page">
