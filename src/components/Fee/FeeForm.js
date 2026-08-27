@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 import {
   HiOutlinePlus, HiOutlineCheckCircle, HiOutlineXCircle,
   HiOutlineChevronDown, HiOutlineChevronUp, HiOutlinePencil,
-  HiOutlineTrash, HiOutlineCheck, HiOutlineX,
+  HiOutlineTrash, HiOutlineCheck, HiOutlineX, HiOutlineSearch,
 } from 'react-icons/hi';
 import { getInitials, formatDate } from '../../utils/helpers';
 
@@ -29,6 +29,9 @@ export default function FeeForm() {
   const [editDueDate, setEditDueDate] = useState('');
   const [editAmount, setEditAmount] = useState('');
   const [saving, setSaving] = useState(false);
+  // Search
+  const [search, setSearch] = useState('');
+  const [studentSearch, setStudentSearch] = useState('');
 
   // Derived from pendingFees so that adding, editing, paying or deleting a fee
   // can update local state instead of refetching the roster and every unpaid fee.
@@ -48,6 +51,29 @@ export default function FeeForm() {
     });
     return Object.values(grouped);
   }, [pendingFees, students]);
+
+  const filteredPending = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return pendingByStudent;
+    return pendingByStudent.filter(({ student }) =>
+      student.name?.toLowerCase().includes(q) || student.email?.toLowerCase().includes(q)
+    );
+  }, [pendingByStudent, search]);
+
+  const filteredStudents = useMemo(() => {
+    const q = studentSearch.trim().toLowerCase();
+    if (!q) return students;
+    // The selected student always stays in the list, so narrowing the search
+    // cannot blank out the picker's current value.
+    return students.filter((s) =>
+      s.id === selectedStudent ||
+      s.name?.toLowerCase().includes(q) ||
+      s.email?.toLowerCase().includes(q)
+    );
+  }, [students, studentSearch, selectedStudent]);
+
+  const pendingTotal = pendingByStudent.reduce((sum, s) => sum + s.totalAmount, 0);
+  const filteredTotal = filteredPending.reduce((sum, s) => sum + s.totalAmount, 0);
 
   useEffect(() => {
     loadInitialData();
@@ -238,7 +264,7 @@ export default function FeeForm() {
               </h3>
               <p style={{ fontSize: '0.8125rem', color: 'var(--gray-500)' }}>
                 {pendingByStudent.length} student{pendingByStudent.length > 1 ? 's' : ''} with unpaid fees
-                 • Total: <span style={{ fontWeight: 700, color: 'var(--danger)' }}>₹{pendingByStudent.reduce((sum, s) => sum + s.totalAmount, 0)}</span>
+                 • Total: <span style={{ fontWeight: 700, color: 'var(--danger)' }}>₹{pendingTotal}</span>
               </p>
             </div>
             <span style={{ color: 'var(--gray-400)', fontSize: '1.25rem' }}>
@@ -247,8 +273,29 @@ export default function FeeForm() {
           </div>
 
           {showPending && (
-            <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {pendingByStudent.map(({ student, fees: pendingFees, totalAmount }) => (
+            <div id="fee-pending-list" style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {/* Search */}
+              <div style={{ position: 'relative' }}>
+                <HiOutlineSearch style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--gray-400)', fontSize: '0.875rem' }} />
+                <input
+                  type="text" placeholder="Search students with pending fees..."
+                  value={search} onChange={(e) => setSearch(e.target.value)}
+                  id="fee-pending-search"
+                  style={{
+                    width: '100%', padding: '8px 10px 8px 32px', fontSize: '0.8125rem',
+                    border: '1px solid var(--gray-200)', borderRadius: 'var(--radius-md)',
+                    background: 'var(--white)', outline: 'none',
+                  }}
+                />
+              </div>
+
+              {filteredPending.length === 0 && (
+                <p style={{ fontSize: '0.8125rem', color: 'var(--gray-400)', padding: '4px 2px' }}>
+                  No students match "{search}".
+                </p>
+              )}
+
+              {filteredPending.map(({ student, fees: pendingFees, totalAmount }) => (
                 <div
                   key={student.id}
                   style={{
@@ -286,23 +333,26 @@ export default function FeeForm() {
                 </div>
               ))}
 
-              {/* Grand Total */}
-              <div style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '12px 14px', borderRadius: 'var(--radius-md)',
-                background: 'var(--danger-light)', marginTop: 4,
-                borderTop: '2px solid var(--danger)',
-              }}>
-                <span style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--gray-700)' }}>
-                  Total Pending
-                </span>
-                <span style={{
-                  fontSize: '1.125rem', fontWeight: 700, color: 'var(--danger)',
-                  fontFamily: 'var(--font-heading)',
+              {/* Grand Total — reflects the search, so a filtered view totals
+                  only what is on screen rather than the whole school. */}
+              {filteredPending.length > 0 && (
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: '12px 14px', borderRadius: 'var(--radius-md)',
+                  background: 'var(--danger-light)', marginTop: 4,
+                  borderTop: '2px solid var(--danger)',
                 }}>
-                  ₹{pendingByStudent.reduce((sum, s) => sum + s.totalAmount, 0)}
-                </span>
-              </div>
+                  <span style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--gray-700)' }}>
+                    {search.trim() ? `Total for ${filteredPending.length} match${filteredPending.length > 1 ? 'es' : ''}` : 'Total Pending'}
+                  </span>
+                  <span style={{
+                    fontSize: '1.125rem', fontWeight: 700, color: 'var(--danger)',
+                    fontFamily: 'var(--font-heading)',
+                  }}>
+                    ₹{filteredTotal}
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -314,12 +364,25 @@ export default function FeeForm() {
         <form onSubmit={handleAdd}>
           <div className="form-group">
             <label className="form-label">Student</label>
+            <div style={{ position: 'relative', marginBottom: 8 }}>
+              <HiOutlineSearch style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--gray-400)', fontSize: '0.875rem' }} />
+              <input
+                type="text" placeholder="Search student..."
+                value={studentSearch} onChange={(e) => setStudentSearch(e.target.value)}
+                id="fee-student-search"
+                style={{
+                  width: '100%', padding: '8px 10px 8px 32px', fontSize: '0.8125rem',
+                  border: '1px solid var(--gray-200)', borderRadius: 'var(--radius-md)',
+                  background: 'var(--white)', outline: 'none',
+                }}
+              />
+            </div>
             <select
               className="form-input" value={selectedStudent}
               onChange={(e) => setSelectedStudent(e.target.value)} id="fee-student"
             >
               <option value="">Select student</option>
-              {students.map((s) => (
+              {filteredStudents.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
