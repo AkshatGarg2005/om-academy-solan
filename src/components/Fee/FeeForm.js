@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
+import { loadStudents, queryByIds } from '../../utils/firestore';
 import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import {
@@ -58,22 +59,22 @@ export default function FeeForm() {
 
   async function loadInitialData() {
     try {
-      let studentsQuery;
-      if (isAdmin) {
-        studentsQuery = query(collection(db, 'users'), where('role', '==', 'student'));
-      } else {
-        studentsQuery = query(
-          collection(db, 'users'),
-          where('role', '==', 'student'),
-          where('teacherIds', 'array-contains', currentUser.uid)
-        );
-      }
-      const [studentsSnap, feesSnap] = await Promise.all([
-        getDocs(studentsQuery),
-        getDocs(query(collection(db, 'fees'), where('paid', '==', false))),
-      ]);
-      setStudents(studentsSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setPendingFees(feesSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      const studentList = await loadStudents(isAdmin, currentUser.uid);
+      setStudents(studentList);
+
+      // Teachers see only their own students' pending fees. The unscoped query
+      // this replaces returned every unpaid fee in the school, so a teacher's
+      // pending total included other teachers' students, listed as "Unknown".
+      const pending = isAdmin
+        ? (await getDocs(query(collection(db, 'fees'), where('paid', '==', false)))).docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+        : await queryByIds(
+            'fees',
+            'studentId',
+            studentList.map((s) => s.id),
+            where('paid', '==', false)
+          );
+      setPendingFees(pending);
     } catch (err) {
       console.error(err);
     } finally {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../config/firebase';
+import { loadStudents, loadTeachers, invalidateStudents } from '../../utils/firestore';
 import { getInitials } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 import {
@@ -21,12 +22,12 @@ export default function AssignStudents() {
 
   async function loadData() {
     try {
-      const [sSnap, tSnap] = await Promise.all([
-        getDocs(query(collection(db, 'users'), where('role', '==', 'student'))),
-        getDocs(query(collection(db, 'users'), where('role', '==', 'teacher'))),
+      const [studentList, teacherList] = await Promise.all([
+        loadStudents(true, null),
+        loadTeachers(),
       ]);
-      setStudents(sSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setTeachers(tSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setStudents(studentList);
+      setTeachers(teacherList);
     } catch (err) {
       console.error(err);
     } finally {
@@ -58,6 +59,8 @@ export default function AssignStudents() {
       setStudents((prev) =>
         prev.map((s) => s.id === studentId ? { ...s, teacherIds: newIds } : s)
       );
+      // Reassignment changes which roster each teacher sees.
+      invalidateStudents();
       const teacher = teachers.find((t) => t.id === teacherId);
       toast.success(
         isAssigned

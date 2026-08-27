@@ -1,33 +1,67 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, limit, startAfter } from 'firebase/firestore';
 import { db } from '../../config/firebase';
+import { countDocs } from '../../utils/firestore';
 import { formatDate } from '../../utils/helpers';
+
+const PAGE_SIZE = 25;
 
 export default function TestReportList() {
   const { currentUser } = useAuth();
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedReport, setExpandedReport] = useState(null);
+  const [total, setTotal] = useState(0);
+  const [lastDoc, setLastDoc] = useState(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
     loadReports();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function reportsQuery(...extra) {
+    return query(
+      collection(db, 'testReports'),
+      where('studentId', '==', currentUser.uid),
+      orderBy('testDate', 'desc'),
+      ...extra
+    );
+  }
+
   async function loadReports() {
     try {
-      const q = query(
-        collection(db, 'testReports'),
-        where('studentId', '==', currentUser.uid),
-        orderBy('testDate', 'desc')
-      );
-      const snap = await getDocs(q);
+      // A page at a time rather than the student's entire history on every
+      // visit; the total comes from a count aggregation.
+      const [count, snap] = await Promise.all([
+        countDocs(query(collection(db, 'testReports'), where('studentId', '==', currentUser.uid))),
+        getDocs(reportsQuery(limit(PAGE_SIZE))),
+      ]);
+      setTotal(count);
       setReports(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setLastDoc(snap.docs[snap.docs.length - 1] || null);
+      setHasMore(snap.size === PAGE_SIZE);
     } catch (err) {
       console.error('Error loading test reports:', err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadMore() {
+    if (!lastDoc) return;
+    setLoadingMore(true);
+    try {
+      const snap = await getDocs(reportsQuery(startAfter(lastDoc), limit(PAGE_SIZE)));
+      setReports((prev) => [...prev, ...snap.docs.map((d) => ({ id: d.id, ...d.data() }))]);
+      setLastDoc(snap.docs[snap.docs.length - 1] || lastDoc);
+      setHasMore(snap.size === PAGE_SIZE);
+    } catch (err) {
+      console.error('Error loading more test reports:', err);
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -145,6 +179,16 @@ export default function TestReportList() {
               </div>
             );
           })}
+          {hasMore && (
+            <button
+              className="btn btn-secondary btn-block"
+              style={{ marginTop: 12 }}
+              onClick={loadMore}
+              disabled={loadingMore}
+            >
+              {loadingMore ? 'Loading...' : `Show older (${reports.length} of ${total})`}
+            </button>
+          )}
         </div>
       )}
     </div>

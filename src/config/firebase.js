@@ -13,5 +13,18 @@ export const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+
+// Deliberately the default in-memory cache, not persistentLocalCache().
+//
+// IndexedDB persistence was measured at +20.7 kB gzip on the main bundle, and it
+// does not reduce reads for how this app queries: getDocs() still goes to the
+// server unless the client is offline. Repeat reads are cut by the TTL cache in
+// utils/firestore.js instead, which costs nothing to ship.
+//
+// Worth revisiting only for offline support — if staff need to mark attendance
+// on an unreliable connection, swap this for initializeFirestore() with
+// persistentLocalCache({ tabManager: persistentMultipleTabManager() }) and
+// accept the bundle cost.
 export const db = getFirestore(app);
+
 export default app;

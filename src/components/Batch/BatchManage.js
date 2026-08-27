@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, addDoc, deleteDoc, updateDoc, doc, query, where, serverTimestamp, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { collection, addDoc, deleteDoc, updateDoc, doc, serverTimestamp, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { db } from '../../config/firebase';
+import { loadStudents, loadBatches, invalidate, invalidateStudents, cacheKeys } from '../../utils/firestore';
 import { useAuth } from '../../contexts/AuthContext';
 import { getInitials } from '../../utils/helpers';
 import toast from 'react-hot-toast';
@@ -28,22 +29,12 @@ export default function BatchManage() {
 
   async function loadData() {
     try {
-      let studentsQuery;
-      if (isAdmin) {
-        studentsQuery = query(collection(db, 'users'), where('role', '==', 'student'));
-      } else {
-        studentsQuery = query(
-          collection(db, 'users'),
-          where('role', '==', 'student'),
-          where('teacherIds', 'array-contains', currentUser.uid)
-        );
-      }
-      const [bSnap, sSnap] = await Promise.all([
-        getDocs(collection(db, 'batches')),
-        getDocs(studentsQuery),
+      const [batchList, studentList] = await Promise.all([
+        loadBatches(),
+        loadStudents(isAdmin, currentUser.uid),
       ]);
-      setBatches(bSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setStudents(sSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setBatches(batchList);
+      setStudents(studentList);
     } catch (err) {
       console.error(err);
     } finally {
@@ -62,6 +53,7 @@ export default function BatchManage() {
       });
       // Append locally rather than refetching every batch and student.
       setBatches((prev) => [...prev, { id: ref.id, ...batch }]);
+      invalidate(cacheKeys.batches);
       toast.success('Batch created!');
       setName('');
       setTiming('');
@@ -88,6 +80,8 @@ export default function BatchManage() {
             : s
         )
       );
+      invalidate(cacheKeys.batches);
+      invalidateStudents();
       toast.success('Batch deleted');
       if (manageBatch === batchId) setManageBatch(null);
     } catch (err) {
@@ -114,6 +108,7 @@ export default function BatchManage() {
       const updated = { name: editName.trim(), timing: editTiming.trim() };
       await updateDoc(doc(db, 'batches', batchId), updated);
       setBatches((prev) => prev.map((b) => (b.id === batchId ? { ...b, ...updated } : b)));
+      invalidate(cacheKeys.batches);
       toast.success('Batch updated!');
       setEditBatch(null);
     } catch (err) {
@@ -157,6 +152,7 @@ export default function BatchManage() {
             : s
         )
       );
+      invalidateStudents();
       toast.success(`${ids.length} student${ids.length > 1 ? 's' : ''} added to batch!`);
       setSelectedToAdd({});
     } catch (err) {
@@ -182,6 +178,7 @@ export default function BatchManage() {
             : s
         )
       );
+      invalidateStudents();
       toast.success(`${ids.length} student${ids.length > 1 ? 's' : ''} removed!`);
       setSelectedToRemove({});
     } catch (err) {

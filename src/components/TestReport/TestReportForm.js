@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, getDocs, addDoc, deleteDoc, doc, serverTimestamp, orderBy } from 'firebase/firestore';
 import { db } from '../../config/firebase';
+import { loadStudents } from '../../utils/firestore';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatDate } from '../../utils/helpers';
 import toast from 'react-hot-toast';
@@ -20,26 +21,15 @@ export default function TestReportForm() {
   const [expandedReport, setExpandedReport] = useState(null);
 
   useEffect(() => {
-    loadStudents();
+    loadStudentList();
   }, []);
 
   useEffect(() => {
     if (selectedStudent) loadStudentReports(selectedStudent);
   }, [selectedStudent]);
 
-  async function loadStudents() {
-    let q;
-    if (isAdmin) {
-      q = query(collection(db, 'users'), where('role', '==', 'student'));
-    } else {
-      q = query(
-        collection(db, 'users'),
-        where('role', '==', 'student'),
-        where('teacherIds', 'array-contains', currentUser.uid)
-      );
-    }
-    const snap = await getDocs(q);
-    setStudents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+  async function loadStudentList() {
+    setStudents(await loadStudents(isAdmin, currentUser.uid));
   }
 
   async function loadStudentReports(studentId) {

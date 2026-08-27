@@ -1,27 +1,50 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, limit, startAfter } from 'firebase/firestore';
 import { db } from '../../config/firebase';
+import { countDocs } from '../../utils/firestore';
 import { HiOutlineCheckCircle, HiOutlineXCircle } from 'react-icons/hi';
+
+const PAGE_SIZE = 25;
 
 export default function FeeView() {
   const { currentUser } = useAuth();
   const [fees, setFees] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [paidCount, setPaidCount] = useState(0);
+  const [unpaidCount, setUnpaidCount] = useState(0);
+  const [lastDoc, setLastDoc] = useState(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
     loadFees();
   }, []);
 
+  function feesQuery(...extra) {
+    return query(
+      collection(db, 'fees'),
+      where('studentId', '==', currentUser.uid),
+      orderBy('createdAt', 'desc'),
+      ...extra
+    );
+  }
+
   async function loadFees() {
     try {
-      const q = query(
-        collection(db, 'fees'),
-        where('studentId', '==', currentUser.uid),
-        orderBy('createdAt', 'desc')
-      );
-      const snap = await getDocs(q);
+      // The paid/pending tallies are counted server-side so they stay accurate
+      // while only the first page of records is downloaded.
+      const mine = query(collection(db, 'fees'), where('studentId', '==', currentUser.uid));
+      const [total, paid, snap] = await Promise.all([
+        countDocs(mine),
+        countDocs(query(mine, where('paid', '==', true))),
+        getDocs(feesQuery(limit(PAGE_SIZE))),
+      ]);
+      setPaidCount(paid);
+      setUnpaidCount(total - paid);
       setFees(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setLastDoc(snap.docs[snap.docs.length - 1] || null);
+      setHasMore(snap.size === PAGE_SIZE);
     } catch (err) {
       console.error('Error loading fees:', err);
     } finally {
@@ -29,12 +52,24 @@ export default function FeeView() {
     }
   }
 
+  async function loadMore() {
+    if (!lastDoc) return;
+    setLoadingMore(true);
+    try {
+      const snap = await getDocs(feesQuery(startAfter(lastDoc), limit(PAGE_SIZE)));
+      setFees((prev) => [...prev, ...snap.docs.map((d) => ({ id: d.id, ...d.data() }))]);
+      setLastDoc(snap.docs[snap.docs.length - 1] || lastDoc);
+      setHasMore(snap.size === PAGE_SIZE);
+    } catch (err) {
+      console.error('Error loading more fees:', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
   if (loading) {
     return <div className="spinner-overlay"><div className="spinner"></div></div>;
   }
-
-  const paidCount = fees.filter((f) => f.paid).length;
-  const unpaidCount = fees.filter((f) => !f.paid).length;
 
   return (
     <div className="page">
@@ -44,7 +79,7 @@ export default function FeeView() {
       </div>
 
       {/* Summary */}
-      {fees.length > 0 && (
+      {(paidCount + unpaidCount) > 0 && (
         <div className="stats-grid" style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 20 }}>
           <div className="stat-card">
             <div className="stat-icon" style={{ background: 'var(--green-100)', color: 'var(--green-700)' }}>
@@ -100,6 +135,16 @@ export default function FeeView() {
               </div>
             );
           })}
+          {hasMore && (
+            <button
+              className="btn btn-secondary btn-block"
+              style={{ marginTop: 12 }}
+              onClick={loadMore}
+              disabled={loadingMore}
+            >
+              {loadingMore ? 'Loading...' : `Show older (${fees.length} of ${paidCount + unpaidCount})`}
+            </button>
+          )}
         </div>
       )}
     </div>

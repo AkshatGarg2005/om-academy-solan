@@ -1,34 +1,41 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 
-// Layout
+// Layout — always rendered, so kept in the main bundle
 import Navbar from './components/Layout/Navbar';
 import Sidebar from './components/Layout/Sidebar';
 import ProtectedRoute from './components/Layout/ProtectedRoute';
 
-// Auth
+// Auth — Login is the first thing a signed-out visitor sees
 import Login from './components/Auth/Login';
-import Register from './components/Auth/Register';
 
-// Pages
-import Dashboard from './components/Dashboard/Dashboard';
-import Profile from './components/Profile/Profile';
-import TestReportList from './components/TestReport/TestReportList';
-import TestReportForm from './components/TestReport/TestReportForm';
-import AttendanceView from './components/Attendance/AttendanceView';
-import AttendanceForm from './components/Attendance/AttendanceForm';
-import CourseView from './components/Course/CourseView';
-import CourseForm from './components/Course/CourseForm';
-import FeeView from './components/Fee/FeeView';
-import FeeForm from './components/Fee/FeeForm';
-import BatchManage from './components/Batch/BatchManage';
-import AllStudents from './components/Teacher/AllStudents';
+// Everything below is split into its own chunk and fetched on first visit, so
+// a student never downloads the admin screens (and vice versa).
+const Register = lazy(() => import('./components/Auth/Register'));
+const Dashboard = lazy(() => import('./components/Dashboard/Dashboard'));
+const Profile = lazy(() => import('./components/Profile/Profile'));
+const TestReportList = lazy(() => import('./components/TestReport/TestReportList'));
+const TestReportForm = lazy(() => import('./components/TestReport/TestReportForm'));
+const AttendanceView = lazy(() => import('./components/Attendance/AttendanceView'));
+const AttendanceForm = lazy(() => import('./components/Attendance/AttendanceForm'));
+const CourseView = lazy(() => import('./components/Course/CourseView'));
+const CourseForm = lazy(() => import('./components/Course/CourseForm'));
+const FeeView = lazy(() => import('./components/Fee/FeeView'));
+const FeeForm = lazy(() => import('./components/Fee/FeeForm'));
+const BatchManage = lazy(() => import('./components/Batch/BatchManage'));
+const AllStudents = lazy(() => import('./components/Teacher/AllStudents'));
+const ManageTeachers = lazy(() => import('./components/Admin/ManageTeachers'));
+const AssignStudents = lazy(() => import('./components/Admin/AssignStudents'));
 
-// Admin Pages
-import ManageTeachers from './components/Admin/ManageTeachers';
-import AssignStudents from './components/Admin/AssignStudents';
+function PageSpinner() {
+  return (
+    <div className="spinner-overlay">
+      <div className="spinner"></div>
+    </div>
+  );
+}
 
 function AppLayout() {
   const { currentUser, userProfile, loading } = useAuth();
@@ -44,11 +51,13 @@ function AppLayout() {
   // Not logged in — show auth pages only
   if (!currentUser || !userProfile) {
     return (
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
+      <Suspense fallback={<PageSpinner />}>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </Suspense>
     );
   }
 
@@ -57,6 +66,7 @@ function AppLayout() {
     <div className="app-layout">
       <Sidebar />
       <main className="main-content">
+        <Suspense fallback={<PageSpinner />}>
         <Routes>
           {/* Dashboard */}
           <Route path="/dashboard" element={
@@ -114,6 +124,7 @@ function AppLayout() {
           <Route path="/register" element={<Navigate to="/dashboard" replace />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
+        </Suspense>
       </main>
       <Navbar />
     </div>

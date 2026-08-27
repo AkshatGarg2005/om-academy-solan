@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, addDoc, deleteDoc, updateDoc, doc, query, where, serverTimestamp, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { collection, addDoc, deleteDoc, updateDoc, doc, serverTimestamp, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { db } from '../../config/firebase';
+import { loadStudents, loadCourses, invalidate, invalidateStudents, cacheKeys } from '../../utils/firestore';
 import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import { HiOutlinePlus, HiOutlineTrash, HiOutlineUserAdd, HiOutlinePencil, HiOutlineCheck, HiOutlineX, HiOutlineSearch } from 'react-icons/hi';
@@ -26,22 +27,12 @@ export default function CourseForm() {
 
   async function loadData() {
     try {
-      let studentsQuery;
-      if (isAdmin) {
-        studentsQuery = query(collection(db, 'users'), where('role', '==', 'student'));
-      } else {
-        studentsQuery = query(
-          collection(db, 'users'),
-          where('role', '==', 'student'),
-          where('teacherIds', 'array-contains', currentUser.uid)
-        );
-      }
-      const [courseSnap, studentSnap] = await Promise.all([
-        getDocs(collection(db, 'courses')),
-        getDocs(studentsQuery),
+      const [courseList, studentList] = await Promise.all([
+        loadCourses(),
+        loadStudents(isAdmin, currentUser.uid),
       ]);
-      setCourses(courseSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setStudents(studentSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setCourses(courseList);
+      setStudents(studentList);
     } catch (err) {
       console.error(err);
     } finally {
@@ -60,6 +51,7 @@ export default function CourseForm() {
       });
       // Append locally rather than refetching every course and student.
       setCourses((prev) => [...prev, { id: ref.id, ...course }]);
+      invalidate(cacheKeys.courses);
       toast.success('Course added!');
       setName('');
       setDescription('');
@@ -88,6 +80,8 @@ export default function CourseForm() {
             : s
         )
       );
+      invalidate(cacheKeys.courses);
+      invalidateStudents();
       toast.success('Course deleted');
     } catch (err) {
       toast.error('Failed to delete');
@@ -113,6 +107,7 @@ export default function CourseForm() {
       const updated = { name: editName.trim(), description: editDesc.trim() };
       await updateDoc(doc(db, 'courses', courseId), updated);
       setCourses((prev) => prev.map((c) => (c.id === courseId ? { ...c, ...updated } : c)));
+      invalidate(cacheKeys.courses);
       toast.success('Course updated!');
       setEditCourse(null);
     } catch (err) {
@@ -135,6 +130,7 @@ export default function CourseForm() {
             : s
         )
       );
+      invalidateStudents();
       toast.success('Student enrolled!');
       setShowEnroll(null);
       setEnrollStudentId('');
@@ -155,6 +151,7 @@ export default function CourseForm() {
             : s
         )
       );
+      invalidateStudents();
       toast.success('Student removed from course');
     } catch (err) {
       toast.error('Failed to unenroll');

@@ -22,3 +22,11 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# service account keys (scripts/set-role-claims.js)
+serviceAccount*.json
+
+# firebase emulator artifacts (scripts/test-rules.mjs)
+firestore-debug.log
+ui-debug.log
+firebase-debug.log

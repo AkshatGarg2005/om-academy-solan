@@ -3,7 +3,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import { db } from '../../config/firebase';
-import { countDocs, countByIds, getDocsByIds } from '../../utils/firestore';
+import { countDocs, countByIds, getDocsByIds, loadStudents } from '../../utils/firestore';
 import { getAttendancePercentage, formatDate, getInitials } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 import {
@@ -14,7 +14,7 @@ import {
 import './Dashboard.css';
 
 export default function Dashboard() {
-  const { currentUser, userProfile, isAdmin, isTeacher, isStaff, logout } = useAuth();
+  const { currentUser, userProfile, isAdmin, isStaff, logout } = useAuth();
   const navigate = useNavigate();
   const [stats, setStats] = useState({
     totalTeachers: 0,
@@ -76,14 +76,7 @@ export default function Dashboard() {
 
     // Teacher: every figure is scoped to their assigned students, so fetch the
     // student ids once and count the related records by id.
-    const studentsSnap = await getDocs(
-      query(
-        collection(db, 'users'),
-        where('role', '==', 'student'),
-        where('teacherIds', 'array-contains', currentUser.uid)
-      )
-    );
-    const studentIds = studentsSnap.docs.map((d) => d.id);
+    const studentIds = (await loadStudents(false, currentUser.uid)).map((s) => s.id);
 
     const [pendingFees, totalTests, totalAttendanceRecords] = await Promise.all([
       countByIds('fees', 'studentId', studentIds, where('paid', '==', false)),

@@ -3,17 +3,23 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ─── Helper Functions ───────────────────────────────────
-    //
-    // Every get() below is billed as a document read, so these helpers are
-    // written to perform as few lookups as possible. Order the clauses at each
-    // call site so the cheap checks (isOwner, isSignedIn) run first.
 
     function isSignedIn() {
       return request.auth != null;
     }
 
+    // Prefers the `role` custom claim, which is carried on the auth token and
+    // costs nothing to read. Falls back to the user document for accounts whose
+    // claim has not been set yet, so this is safe to deploy before (or without)
+    // running scripts/set-role-claims.js. The ternary is lazy, so the billed
+    // get() is skipped entirely whenever a claim is present.
+    //
+    // The claim wins over the document when both exist, so re-run the script
+    // after changing anyone's role or the stale claim will take effect.
     function getUserRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+      return 'role' in request.auth.token
+        ? request.auth.token.role
+        : get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
 
     function isAdmin() {
@@ -24,7 +30,7 @@ service cloud.firestore {
       return isSignedIn() && getUserRole() == 'teacher';
     }
 
-    // One role lookup rather than two. `isAdmin() || isTeacher()` would call
+    // One role lookup rather than two. `isAdmin() || isTeacher()` would resolve
     // getUserRole() once per branch.
     function isStaff() {
       return isSignedIn() && getUserRole() in ['admin', 'teacher'];
@@ -34,10 +40,17 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    // True when an update touches none of the fields outside `fields`. Tolerates
+    // fields that are absent on the existing document, which a direct equality
+    // comparison does not.
+    function changesOnly(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
     // ─── Users Collection ───────────────────────────────────
 
     match /users/{userId} {
-      // Split into two independent allow rules rather than one OR.
+      // Two independent allow rules rather than one OR.
       //
       // Reading your own profile is the app's cold-start path: AuthContext
       // fetches it before anything renders. Matching it with `get` alone means
@@ -51,30 +64,35 @@ service cloud.firestore {
       allow read: if isStaff();
 
       // Self-registration (students only)
-      allow create: if isSignedIn() && isOwner(userId) &&
+      allow create: if isOwner(userId) &&
         request.resource.data.role == 'student';
 
-      // Staff can create users (teachers add students, admin adds teachers)
-      // TODO(security): this permits a teacher to create a user document with
-      // role 'admin'. Constrain it — teachers to role == 'student', admins to
-      // role in ['student', 'teacher'].
-      allow create: if isStaff();
+      // Admins may create any account. Teachers may only create students —
+      // this is what stops a teacher provisioning an admin account for
+      // themselves, since the app already gives them account-creation UI.
+      allow create: if isAdmin();
+      allow create: if isTeacher() &&
+        request.resource.data.role == 'student';
 
-      // Users can update own non-role, non-teacherIds fields
-      allow update: if isOwner(userId) &&
-        request.resource.data.role == resource.data.role &&
-        request.resource.data.teacherIds == resource.data.teacherIds;
+      // Own profile: contact and personal details only. role, teacherIds,
+      // batchIds and courseIds are all excluded, so a student cannot grant
+      // themselves a role or self-enrol into a batch or course.
+      allow update: if isOwner(userId) && changesOnly([
+        'name', 'studentPhone', 'phone', 'aadhaar', 'dob', 'address',
+        'previousEducation', 'mothersName', 'fathersName', 'guardianName',
+        'guardianPhone', 'subject', 'updatedAt'
+      ]);
 
       // Admin can update anything
       allow update: if isAdmin();
 
-      // Teachers can update their assigned students (no role/teacherIds changes)
-      // TODO(security): this matches any student, not only assigned ones. Add
-      // `request.auth.uid in resource.data.teacherIds`.
+      // Teachers may only change batch and course membership, and only for
+      // students actually assigned to them.
       allow update: if isTeacher() &&
         resource.data.role == 'student' &&
-        request.resource.data.role == resource.data.role &&
-        request.resource.data.teacherIds == resource.data.teacherIds;
+        'teacherIds' in resource.data &&
+        request.auth.uid in resource.data.teacherIds &&
+        changesOnly(['batchIds', 'courseIds']);
 
       // Only admin can delete users
       allow delete: if isAdmin();
@@ -98,9 +116,10 @@ service cloud.firestore {
 
     match /testReports/{reportId} {
       // Staff can read all, students only their own.
+      //
       // NOTE: putting `resource.data.studentId == request.auth.uid` first would
       // save students a billed role lookup, but on unfiltered staff queries that
-      // clause is indeterminate and the OR relies on CEL error absorption to
+      // clause is indeterminate and the OR would rely on CEL error absorption to
       // still resolve via isStaff(). Validate in the emulator before reordering
       // — a mistake here breaks every staff list query.
       allow read: if isSignedIn() && (
@@ -131,6 +150,11 @@ service cloud.firestore {
     match /fees/{feeId} {
       // Staff can read all, students only their own. See the ordering note on
       // testReports before changing the clause order here.
+      //
+      // Teachers hold a blanket read here, so scoping a teacher to their own
+      // students' fees is enforced in the app (FeeForm), not in these rules.
+      // Tightening it at this layer needs `teacherIds` denormalised onto fee
+      // documents, which requires a backfill over existing data.
       allow read: if isSignedIn() && (
         isStaff() || resource.data.studentId == request.auth.uid
       );

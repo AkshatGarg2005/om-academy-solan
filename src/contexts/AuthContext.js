@@ -7,6 +7,7 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
+import { clearCache } from '../utils/firestore';
 
 const AuthContext = createContext();
 
@@ -38,6 +39,9 @@ export function AuthProvider({ children }) {
 
   async function logout() {
     setUserProfile(null);
+    // Drop cached reference data so the next account to sign in on this tab
+    // does not read the previous one's roster.
+    clearCache();
     return signOut(auth);
   }
 
@@ -64,7 +68,8 @@ export function AuthProvider({ children }) {
     if (!currentUser) throw new Error('Not authenticated');
     const docRef = doc(db, 'users', currentUser.uid);
     await updateDoc(docRef, { ...data, updatedAt: serverTimestamp() });
-    await fetchUserProfile(currentUser);
+    // Merge locally rather than re-reading the document we just wrote.
+    setUserProfile((prev) => ({ ...prev, ...data }));
   }
 
   useEffect(() => {

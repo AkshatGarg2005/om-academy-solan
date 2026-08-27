@@ -1,8 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
-import { collection, query, where, getDocs, doc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db, firebaseConfig } from '../../config/firebase';
+import {
+  loadStudents, loadBatches, loadTeachers,
+  invalidateStudents, commitInChunks,
+} from '../../utils/firestore';
 import { useAuth } from '../../contexts/AuthContext';
 import { getInitials } from '../../utils/helpers';
 
@@ -38,29 +42,16 @@ export default function AllStudents() {
 
   async function loadData() {
     try {
-      let studentsQuery;
-      if (isAdmin) {
-        studentsQuery = query(collection(db, 'users'), where('role', '==', 'student'));
-      } else {
-        // Teacher: only students assigned to them
-        studentsQuery = query(
-          collection(db, 'users'),
-          where('role', '==', 'student'),
-          where('teacherIds', 'array-contains', currentUser.uid)
-        );
-      }
-      const [sSnap, bSnap] = await Promise.all([
-        getDocs(studentsQuery),
-        getDocs(collection(db, 'batches')),
+      // Shared with the other staff screens, so moving between them no longer
+      // re-downloads the roster and batch list each time.
+      const [studentList, batchList, teacherList] = await Promise.all([
+        loadStudents(isAdmin, currentUser.uid),
+        loadBatches(),
+        isAdmin ? loadTeachers() : Promise.resolve([]),
       ]);
-      setStudents(sSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setBatches(bSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
-
-      // Admin: also load teachers for filter dropdown
-      if (isAdmin) {
-        const tSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'teacher')));
-        setTeachers(tSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      }
+      setStudents(studentList);
+      setBatches(batchList);
+      setTeachers(teacherList);
     } catch (err) {
       console.error(err);
     } finally {
@@ -97,14 +88,17 @@ export default function AllStudents() {
         getDocs(query(collection(db, 'testReports'), where('studentId', '==', studentId))),
         getDocs(query(collection(db, 'fees'), where('studentId', '==', studentId))),
       ]);
+      // Committed as batches so a mid-flight failure cannot leave the student
+      // deleted but their records behind (or the reverse).
       const deletes = [];
-      attSnap.docs.forEach((d) => deletes.push(deleteDoc(doc(db, 'attendance', d.id))));
-      testSnap.docs.forEach((d) => deletes.push(deleteDoc(doc(db, 'testReports', d.id))));
-      feeSnap.docs.forEach((d) => deletes.push(deleteDoc(doc(db, 'fees', d.id))));
-      deletes.push(deleteDoc(doc(db, 'users', studentId)));
-      await Promise.all(deletes);
+      attSnap.docs.forEach((d) => deletes.push((b) => b.delete(doc(db, 'attendance', d.id))));
+      testSnap.docs.forEach((d) => deletes.push((b) => b.delete(doc(db, 'testReports', d.id))));
+      feeSnap.docs.forEach((d) => deletes.push((b) => b.delete(doc(db, 'fees', d.id))));
+      deletes.push((b) => b.delete(doc(db, 'users', studentId)));
+      await commitInChunks(deletes);
       // Drop from local state rather than refetching the roster and batches.
       setStudents((prev) => prev.filter((s) => s.id !== studentId));
+      invalidateStudents();
       toast.success(`${studentName} deleted`);
     } catch (err) {
       console.error(err);
@@ -177,6 +171,7 @@ export default function AllStudents() {
 
       // Append locally rather than refetching the roster and batches.
       setStudents((prev) => [...prev, { id: cred.user.uid, ...student }]);
+      invalidateStudents();
       toast.success(`${form.name.trim()} added successfully!`);
       resetAddForm();
     } catch (err) {
@@ -395,16 +390,20 @@ export default function AllStudents() {
                     <DetailField label="Admission Date" value={student.dateOfAdmission} />
                   </div>
 
-                  {/* Delete button */}
-                  <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--gray-100)', display: 'flex', justifyContent: 'flex-end' }}>
-                    <button
-                      className="btn btn-sm"
-                      style={{ color: 'var(--danger)', background: 'var(--danger-light)', border: 'none' }}
-                      onClick={(e) => { e.stopPropagation(); handleDelete(student.id, student.name); }}
-                    >
-                      <HiOutlineTrash /> Delete Student
-                    </button>
-                  </div>
+                  {/* Delete button — admin only, matching the security rules.
+                      Shown to teachers previously, where it always failed part
+                      way through and left records behind. */}
+                  {isAdmin && (
+                    <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--gray-100)', display: 'flex', justifyContent: 'flex-end' }}>
+                      <button
+                        className="btn btn-sm"
+                        style={{ color: 'var(--danger)', background: 'var(--danger-light)', border: 'none' }}
+                        onClick={(e) => { e.stopPropagation(); handleDelete(student.id, student.name); }}
+                      >
+                        <HiOutlineTrash /> Delete Student
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

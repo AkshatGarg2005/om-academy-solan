@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, addDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
+import { loadBatches, commitInChunks } from '../../utils/firestore';
 import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import { HiOutlineClipboardCheck } from 'react-icons/hi';
@@ -20,7 +21,7 @@ export default function AttendanceForm() {
   const [isUpdate, setIsUpdate] = useState(false);
 
   useEffect(() => {
-    loadBatches();
+    loadBatchList();
   }, []);
 
   useEffect(() => {
@@ -38,9 +39,8 @@ export default function AttendanceForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date, students]);
 
-  async function loadBatches() {
-    const snap = await getDocs(collection(db, 'batches'));
-    setBatches(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+  async function loadBatchList() {
+    setBatches(await loadBatches());
   }
 
   async function loadBatchStudents(batchId) {
@@ -132,33 +132,33 @@ export default function AttendanceForm() {
     }
     setSubmitting(true);
     try {
-      const ops = [];
-      for (const student of students) {
+      // Committed as one batch rather than a request per student: a single
+      // round trip, one security-rule evaluation instead of one per write, and
+      // atomic, so a failure part way through cannot half-save the register.
+      const ops = students.map((student) => {
         const existingDocId = existingRecords[student.id];
+        const present = attendance[student.id] ?? true;
         if (existingDocId) {
           // Update existing record
-          ops.push(
-            updateDoc(doc(db, 'attendance', existingDocId), {
-              present: attendance[student.id] ?? true,
-              markedBy: currentUser.uid,
-              updatedAt: serverTimestamp(),
-            })
-          );
-        } else {
-          // Create new record
-          ops.push(
-            addDoc(collection(db, 'attendance'), {
-              studentId: student.id,
-              batchId: selectedBatch,
-              date,
-              present: attendance[student.id] ?? true,
-              markedBy: currentUser.uid,
-              createdAt: serverTimestamp(),
-            })
-          );
+          return (b) => b.update(doc(db, 'attendance', existingDocId), {
+            present,
+            markedBy: currentUser.uid,
+            updatedAt: serverTimestamp(),
+          });
         }
-      }
-      await Promise.all(ops);
+        // Create new record. doc() with no id mints a reference up front, which
+        // is what addDoc does internally before its own round trip.
+        const ref = doc(collection(db, 'attendance'));
+        return (b) => b.set(ref, {
+          studentId: student.id,
+          batchId: selectedBatch,
+          date,
+          present,
+          markedBy: currentUser.uid,
+          createdAt: serverTimestamp(),
+        });
+      });
+      await commitInChunks(ops);
       const action = isUpdate ? 'updated' : 'marked';
       toast.success(`Attendance ${action} for ${students.length} students!`);
       // Reload to reflect saved state

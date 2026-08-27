@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, limit, startAfter } from 'firebase/firestore';
 import { db } from '../../config/firebase';
+import { countDocs, loadBatches } from '../../utils/firestore';
 import { formatDate, getAttendancePercentage } from '../../utils/helpers';
 import { HiOutlineCheckCircle, HiOutlineXCircle } from 'react-icons/hi';
+
+const PAGE_SIZE = 25;
 
 export default function AttendanceView() {
   const { currentUser } = useAuth();
@@ -12,35 +15,65 @@ export default function AttendanceView() {
   const [loading, setLoading] = useState(true);
   const [presentCount, setPresentCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
+  const [lastDoc, setLastDoc] = useState(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function recordsQuery(...extra) {
+    return query(
+      collection(db, 'attendance'),
+      where('studentId', '==', currentUser.uid),
+      orderBy('date', 'desc'),
+      ...extra
+    );
+  }
+
   async function loadData() {
     try {
-      // Load batches for name lookup
-      const batchSnap = await getDocs(collection(db, 'batches'));
+      const mine = query(collection(db, 'attendance'), where('studentId', '==', currentUser.uid));
+      const [batchList, total, present, snap] = await Promise.all([
+        loadBatches(),
+        // Totals are counted server-side so the percentage stays correct while
+        // only the first page of records is downloaded. This used to pull the
+        // student's entire attendance history on every visit.
+        countDocs(mine),
+        countDocs(query(mine, where('present', '==', true))),
+        getDocs(recordsQuery(limit(PAGE_SIZE))),
+      ]);
+
       const batchMap = {};
-      batchSnap.docs.forEach((d) => { batchMap[d.id] = d.data().name; });
+      batchList.forEach((b) => { batchMap[b.id] = b.name; });
       setBatches(batchMap);
 
-      // Load attendance records
-      const q = query(
-        collection(db, 'attendance'),
-        where('studentId', '==', currentUser.uid),
-        orderBy('date', 'desc')
-      );
-      const snap = await getDocs(q);
-      const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setRecords(data);
-      setTotalCount(data.length);
-      setPresentCount(data.filter((r) => r.present).length);
+      setTotalCount(total);
+      setPresentCount(present);
+      setRecords(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setLastDoc(snap.docs[snap.docs.length - 1] || null);
+      setHasMore(snap.size === PAGE_SIZE);
     } catch (err) {
       console.error('Error loading attendance:', err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadMore() {
+    if (!lastDoc) return;
+    setLoadingMore(true);
+    try {
+      const snap = await getDocs(recordsQuery(startAfter(lastDoc), limit(PAGE_SIZE)));
+      setRecords((prev) => [...prev, ...snap.docs.map((d) => ({ id: d.id, ...d.data() }))]);
+      setLastDoc(snap.docs[snap.docs.length - 1] || lastDoc);
+      setHasMore(snap.size === PAGE_SIZE);
+    } catch (err) {
+      console.error('Error loading more attendance:', err);
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -121,6 +154,16 @@ export default function AttendanceView() {
               </span>
             </div>
           ))}
+          {hasMore && (
+            <button
+              className="btn btn-secondary btn-block"
+              style={{ marginTop: 12 }}
+              onClick={loadMore}
+              disabled={loadingMore}
+            >
+              {loadingMore ? 'Loading...' : `Show older (${records.length} of ${totalCount})`}
+            </button>
+          )}
         </div>
       )}
     </div>

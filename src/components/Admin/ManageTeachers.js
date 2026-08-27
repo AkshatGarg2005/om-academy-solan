@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
-import { collection, query, where, getDocs, doc, setDoc, deleteDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, doc, setDoc, deleteDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db, firebaseConfig } from '../../config/firebase';
 import { getInitials } from '../../utils/helpers';
-import { countDocs } from '../../utils/firestore';
+import {
+  countDocs, loadTeachers as fetchTeachers, invalidate, cacheKeys,
+} from '../../utils/firestore';
 import toast from 'react-hot-toast';
 import {
   HiOutlinePlus, HiOutlineTrash, HiOutlineX, HiOutlineSearch,
@@ -33,8 +35,7 @@ export default function ManageTeachers() {
 
   async function loadTeachers() {
     try {
-      const snap = await getDocs(query(collection(db, 'users'), where('role', '==', 'teacher')));
-      const teacherList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const teacherList = await fetchTeachers();
       // Count each teacher's students server-side, rather than downloading the
       // entire student roster just to tally it here.
       const studentCounts = await Promise.all(
@@ -96,6 +97,7 @@ export default function ManageTeachers() {
 
       // Append locally rather than reloading and re-counting every teacher.
       setTeachers((prev) => [...prev, { id: cred.user.uid, ...teacher, studentCount: 0 }]);
+      invalidate(cacheKeys.teachers);
       toast.success(`${form.name.trim()} added as teacher!`);
       resetForm();
     } catch (err) {
@@ -142,6 +144,7 @@ export default function ManageTeachers() {
       setTeachers((prev) =>
         prev.map((t) => (t.id === editTeacherId ? { ...t, ...updated } : t))
       );
+      invalidate(cacheKeys.teachers);
       toast.success('Teacher updated!');
       setEditTeacherId(null);
       setEditForm({});
@@ -158,6 +161,7 @@ export default function ManageTeachers() {
     try {
       await deleteDoc(doc(db, 'users', teacherId));
       setTeachers((prev) => prev.filter((t) => t.id !== teacherId));
+      invalidate(cacheKeys.teachers);
       toast.success(`${teacherName} removed`);
     } catch (err) {
       console.error(err);
