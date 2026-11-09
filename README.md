@@ -1,70 +1,88 @@
-# Getting Started with Create React App
+# Om Academy — Coaching Institute Management System
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A multi-role web platform that replaced paper registers at Om Academy, a coaching institute in Solan, Himachal Pradesh. Attendance, test reports, fees, courses and batches for **414 students** now run in one app, with separate dashboards for admins, teachers and students.
 
-## Available Scripts
+**Live:** [om-academy-solan-beta.vercel.app](https://om-academy-solan-beta.vercel.app) (sign-in required — it holds real student records)
 
-In the project directory, you can run:
+## Impact
 
-### `yarn start`
+- Replaced paper-driven attendance, test-report, fee and enrollment workflows for 414 students
+- Digitized **6,952+** attendance records
+- Automated fee tracking with due-date alerts and overdue flags — **99.3%** on-time collection
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+## Features by role
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+**Students**
+- Personal dashboard with attendance percentage, test reports, enrolled courses and batch schedule
+- Fee alerts for upcoming and overdue payments
 
-### `yarn test`
+**Teachers**
+- Mark daily attendance and log test results
+- Manage assigned batches and view their student rosters
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+**Admins**
+- Institute-wide view of attendance and pending fees
+- Student and teacher directories, and role assignment for every user
 
-### `yarn build`
+## Architecture and security
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+- **Role-based access control:** three tiers (Admin → Teacher → Student) enforced with route guards (`adminOnly`, `staffOnly`)
+- **Auth state:** handled in a React context driven by Firebase's `onAuthStateChanged`
+- **Scoped real-time data:** Firestore queries are scoped per role, so teachers only read their assigned students and batches, and students only see their own records
+- **Modular codebase:** 11 feature modules — Admin, Attendance, Auth, Batch, Course, Dashboard, Fee, Layout, Profile, Teacher and TestReport
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+## Tech stack
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+- **Frontend:** React 19, React Router 7, custom CSS (glassmorphism UI, mobile-first layout)
+- **Backend:** Firebase Authentication, Cloud Firestore (with security rules)
+- **UI libraries:** react-hot-toast, react-icons
+- **Deployment:** Vercel
 
-### `yarn eject`
+## Project structure
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+```
+src/
+├── components/
+│   ├── Admin/        # Institute-wide analytics and role management
+│   ├── Attendance/   # Daily attendance marking and tracking
+│   ├── Auth/         # Sign-in and route guards
+│   ├── Batch/        # Batch schedules and assignments
+│   ├── Course/       # Courses and enrollment
+│   ├── Dashboard/    # Role-specific dashboards
+│   ├── Fee/          # Fee tracking and alerts
+│   ├── Layout/       # App shell and navigation
+│   ├── Profile/      # User profiles
+│   ├── Teacher/      # Teacher tools and rosters
+│   ├── TestReport/   # Test results and reports
+│   └── common/       # Shared UI components
+├── config/           # Firebase configuration
+├── contexts/         # Auth context
+└── utils/            # Helpers
+```
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+## Running locally
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+1. Clone the repository and install dependencies:
+   ```bash
+   git clone https://github.com/AkshatGarg2005/om-academy-solan.git
+   cd om-academy-solan
+   yarn
+   ```
+2. Create a Firebase project with Email/Password authentication and Cloud Firestore enabled.
+3. Copy `.env.example` to `.env` and fill in your Firebase config:
+   ```
+   REACT_APP_FIREBASE_API_KEY=
+   REACT_APP_FIREBASE_AUTH_DOMAIN=
+   REACT_APP_FIREBASE_PROJECT_ID=
+   REACT_APP_FIREBASE_STORAGE_BUCKET=
+   REACT_APP_FIREBASE_MESSAGING_SENDER_ID=
+   REACT_APP_FIREBASE_APP_ID=
+   ```
+4. Start the dev server:
+   ```bash
+   yarn start
+   ```
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+## Author
 
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `yarn build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+**Akshat Garg** — [Portfolio](https://akshatgarg2005.vercel.app) · [LinkedIn](https://www.linkedin.com/in/akshat-garg-vitbhopal/) · [GitHub](https://github.com/AkshatGarg2005)
